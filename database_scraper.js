@@ -12,7 +12,7 @@ const {
 async function fetchYahooAuctionProductsWithDB() {
     let allProducts = [];
     let browser = null;
-    const maxPages = 10; // 先測試10頁
+    const maxPages = parseInt(process.env.MAX_PAGES) || 50; // 抓取所有頁面
 
     try {
         console.log('🔄 使用原始順序抓取邏輯 + 資料庫存儲...');

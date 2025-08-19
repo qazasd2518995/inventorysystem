@@ -1774,26 +1774,54 @@ app.get('/api/auth-status', (req, res) => {
     }
 });
 
-// API路由 - 取得商品列表（智慧更新）
+// API路由 - 取得商品列表（從資料庫讀取）
 app.get('/api/products', requireAuth, async (req, res) => {
     try {
-        const forceFullUpdate = req.query.full === 'true'; // 允許強制完整更新
-        const now = new Date();
+        console.log('📊 從資料庫獲取商品列表...');
         
-        // 首次載入或強制完整更新
-        if (!isUpdating && (productsCache.length === 0 || forceFullUpdate)) {
-            isUpdating = true;
-            console.log('執行完整商品抓取...');
+        // 從資料庫獲取商品
+        const products = await getActiveProducts();
+        const stats = await getProductStats();
+        
+        console.log(`✅ 從資料庫讀取到 ${products.length} 個商品`);
+        
+        // 如果資料庫沒有資料，觸發初始化抓取
+        if (products.length === 0) {
+            console.log('⚠️ 資料庫無資料，觸發初始化抓取...');
             try {
                 await fetchYahooAuctionProducts();
+                // 重新從資料庫讀取
+                const newProducts = await getActiveProducts();
+                const newStats = await getProductStats();
                 
-                if (productsCache.length === 0) {
-                    console.log('抓取失敗，使用測試資料');
-                    productsCache = generateTestData();
-                    lastUpdateTime = new Date();
-                }
-            } finally {
-                isUpdating = false;
+                res.json({
+                    success: true,
+                    products: newProducts,
+                    lastUpdate: newStats.lastUpdate,
+                    total: newStats.total,
+                    imageStats: {
+                        withImages: newStats.withImages,
+                        withoutImages: newStats.withoutImages,
+                        successRate: newStats.imageSuccessRate
+                    }
+                });
+                return;
+            } catch (error) {
+                console.error('初始化抓取失敗:', error.message);
+                // 使用測試資料作為備用
+                const testData = generateTestData();
+                res.json({
+                    success: true,
+                    products: testData,
+                    lastUpdate: new Date(),
+                    total: testData.length,
+                    imageStats: {
+                        withImages: testData.length,
+                        withoutImages: 0,
+                        successRate: '100.0%'
+                    }
+                });
+                return;
             }
         }
         // 智慧更新邏輯：超過5分鐘且距離上次完整掃描超過2小時，或超過30分鐘
@@ -1821,13 +1849,17 @@ app.get('/api/products', requireAuth, async (req, res) => {
             }
         }
         
+        // 返回資料庫數據
         res.json({
             success: true,
-            products: productsCache,
-            lastUpdate: lastUpdateTime,
-            lastFullScan: lastFullScanTime,
-            total: productsCache.length,
-            recentLogs: updateLogs.slice(0, 5) // 回傳最新的5條日誌
+            products: products,
+            lastUpdate: stats.lastUpdate,
+            total: stats.total,
+            imageStats: {
+                withImages: stats.withImages,
+                withoutImages: stats.withoutImages,
+                successRate: stats.imageSuccessRate
+            }
         });
     } catch (error) {
         console.error('API 錯誤:', error);
