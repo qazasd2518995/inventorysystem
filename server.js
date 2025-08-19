@@ -1824,7 +1824,9 @@ app.get('/api/products', requireAuth, async (req, res) => {
                 return;
             }
         }
-        // 智慧更新邏輯：超過5分鐘且距離上次完整掃描超過2小時，或超過30分鐘
+        
+        // 智慧更新邏輯（暫時停用，直接返回資料庫資料）
+        /*
         else if (!isUpdating && lastUpdateTime && 
                 ((now - lastUpdateTime) > 5 * 60 * 1000 && 
                  (!lastFullScanTime || (now - lastFullScanTime) > 2 * 60 * 60 * 1000)) ||
@@ -1848,6 +1850,7 @@ app.get('/api/products', requireAuth, async (req, res) => {
                 isUpdating = false;
             }
         }
+        */
         
         // 返回資料庫數據
         res.json({
