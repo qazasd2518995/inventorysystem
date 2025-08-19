@@ -1673,7 +1673,7 @@ app.get('/api/health', (req, res) => {
         uptime: process.uptime(),
         memory: process.memoryUsage(),
         isUpdating,
-        productsCount: productsCache.length,
+        productsCount: 'checking database...',
         lastUpdate: lastUpdateTime
     });
 });
@@ -1923,12 +1923,21 @@ app.get('/api/partial-update', requireAuth, async (req, res) => {
                 // 執行部分更新
                 await partialUpdateProducts(detectionResult);
                 
+                // 從資料庫讀取最新資料
+                const products = await getActiveProducts();
+                const stats = await getProductStats();
+                
                 res.json({
                     success: true,
                     message: `部分更新完成：新增 ${detectionResult.newProductsCount} 個，修改 ${detectionResult.modifiedProductsCount} 個，移除 ${detectionResult.removedProductsCount} 個商品`,
-                    products: productsCache,
-                    lastUpdate: lastUpdateTime,
-                    total: productsCache.length,
+                    products: products,
+                    lastUpdate: stats.lastUpdate,
+                    total: stats.total,
+                    imageStats: {
+                        withImages: stats.withImages,
+                        withoutImages: stats.withoutImages,
+                        successRate: stats.imageSuccessRate
+                    },
                     updateStats: {
                         newProducts: detectionResult.newProductsCount,
                         modifiedProducts: detectionResult.modifiedProductsCount,
@@ -1938,12 +1947,21 @@ app.get('/api/partial-update', requireAuth, async (req, res) => {
                     }
                 });
             } else {
+                // 從資料庫讀取最新資料
+                const products = await getActiveProducts();
+                const stats = await getProductStats();
+                
                 res.json({
                     success: true,
                     message: '未發現商品變更，無需更新',
-                    products: productsCache,
-                    lastUpdate: lastUpdateTime,
-                    total: productsCache.length
+                    products: products,
+                    lastUpdate: stats.lastUpdate,
+                    total: stats.total,
+                    imageStats: {
+                        withImages: stats.withImages,
+                        withoutImages: stats.withoutImages,
+                        successRate: stats.imageSuccessRate
+                    }
                 });
             }
         } finally {
@@ -1974,11 +1992,20 @@ app.get('/api/force-update', requireAuth, async (req, res) => {
         
         try {
             await fetchYahooAuctionProducts();
+            
+            // 從資料庫讀取最新統計
+            const stats = await getProductStats();
+            
             res.json({
                 success: true,
-                message: `完整更新完成，共 ${productsCache.length} 個商品`,
-                total: productsCache.length,
-                lastUpdate: lastUpdateTime
+                message: `完整更新完成，共 ${stats.total} 個商品`,
+                total: stats.total,
+                lastUpdate: stats.lastUpdate,
+                imageStats: {
+                    withImages: stats.withImages,
+                    withoutImages: stats.withoutImages,
+                    successRate: stats.imageSuccessRate
+                }
             });
         } finally {
             isUpdating = false;
@@ -2085,20 +2112,24 @@ app.post('/api/clear-logs', requireAuth, async (req, res) => {
 app.post('/api/refresh', async (req, res) => {
     try {
         console.log('強制更新商品資料...');
-        const products = await fetchYahooAuctionProducts();
+        await fetchYahooAuctionProducts();
         
-        // 如果抓取失敗，使用測試資料
-        if (products.length === 0) {
-            console.log('抓取失敗，使用測試資料');
-            productsCache = generateTestData();
-            lastUpdateTime = new Date();
-        }
+        // 從資料庫讀取最新資料
+        const products = await getActiveProducts();
+        const stats = await getProductStats();
+        
+        console.log(`✅ 更新完成，從資料庫讀取到 ${products.length} 個商品`);
         
         res.json({
             success: true,
-            products: productsCache,
-            lastUpdate: lastUpdateTime,
-            total: productsCache.length
+            products: products,
+            lastUpdate: stats.lastUpdate,
+            total: stats.total,
+            imageStats: {
+                withImages: stats.withImages,
+                withoutImages: stats.withoutImages,
+                successRate: stats.imageSuccessRate
+            }
         });
     } catch (error) {
         console.error('強制更新錯誤:', error);
@@ -2109,17 +2140,23 @@ app.post('/api/refresh', async (req, res) => {
     }
 });
 
-// API路由 - 匯出Excel
+// API路由 - 匯出Excel（從資料庫讀取）
 app.get('/api/export', requireAuth, async (req, res) => {
     try {
-        // 確保有最新資料
-        if (!isUpdating && productsCache.length === 0) {
-            isUpdating = true;
-            try {
-                await fetchYahooAuctionProducts();
-            } finally {
-                isUpdating = false;
-            }
+        console.log('📊 從資料庫讀取商品進行Excel匯出...');
+        
+        // 直接從資料庫獲取最新商品資料
+        const products = await getActiveProducts();
+        const stats = await getProductStats();
+        
+        console.log(`✅ 從資料庫讀取到 ${products.length} 個商品用於Excel匯出`);
+        
+        // 如果資料庫沒有資料，提示用戶
+        if (products.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: '資料庫中沒有商品資料，請先執行商品抓取'
+            });
         }
 
         // 建立新的工作簿
@@ -2147,10 +2184,10 @@ app.get('/api/export', requireAuth, async (req, res) => {
         // 設定列高以容納圖片
         worksheet.getRow(1).height = 30; // 標題列
         
-        console.log(`開始處理 ${productsCache.length} 個商品的Excel匯出...`);
+        console.log(`開始處理 ${products.length} 個商品的Excel匯出...`);
         
-        // 加入所有商品資料
-        productsCache.forEach((product, index) => {
+        // 加入所有商品資料（從資料庫）
+        products.forEach((product, index) => {
             const rowIndex = index + 2; // 從第2列開始（第1列是標題）
             
             // 加入基本資料
@@ -2160,7 +2197,7 @@ app.get('/api/export', requireAuth, async (req, res) => {
                 price: `NT$ ${product.price.toLocaleString()}`,
                 image: '點擊查看圖片', // 圖片欄位顯示文字，但會是超連結
                 link: '點擊查看商品', // 商品連結
-                updateTime: new Date(product.updateTime || new Date()).toLocaleString('zh-TW')
+                updateTime: new Date(product.updatedAt || new Date()).toLocaleString('zh-TW')
             });
             
             // 為圖片網址建立超連結
@@ -2195,7 +2232,7 @@ app.get('/api/export', requireAuth, async (req, res) => {
             linkCell.alignment = { vertical: 'middle', horizontal: 'center' };
         });
         
-        console.log(`Excel資料處理完成！處理了 ${productsCache.length} 個商品`);
+        console.log(`Excel資料處理完成！處理了 ${products.length} 個商品`);
 
         // 設定邊框
         worksheet.eachRow((row, rowNumber) => {
