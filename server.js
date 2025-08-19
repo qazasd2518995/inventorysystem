@@ -667,26 +667,34 @@ async function scrapePage(browser, pageNum) {
             timeout: 30000 
         });
 
-        // 滾動頁面觸發懶載入圖片
+        // 更徹底的滾動觸發懶載入圖片
         await page.evaluate(() => {
             return new Promise((resolve) => {
                 let totalHeight = 0;
-                const distance = 100;
+                const distance = 50; // 更小的步長，確保所有圖片都被觸發
+                let scrollCount = 0;
                 const timer = setInterval(() => {
                     const scrollHeight = document.body.scrollHeight;
                     window.scrollBy(0, distance);
                     totalHeight += distance;
+                    scrollCount++;
 
-                    if(totalHeight >= scrollHeight){
-                        clearInterval(timer);
-                        resolve();
+                    // 確保滾動到底部，並且多滾動幾次
+                    if(totalHeight >= scrollHeight || scrollCount > 200){
+                        // 滾動到頂部再滾動到底部，確保所有內容都被載入
+                        window.scrollTo(0, 0);
+                        setTimeout(() => {
+                            window.scrollTo(0, document.body.scrollHeight);
+                            clearInterval(timer);
+                            resolve();
+                        }, 500);
                     }
-                }, 100);
+                }, 50); // 更快的滾動頻率
             });
         });
 
-        // 短暫等待確保圖片載入
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 更長的等待時間確保圖片載入
+        await new Promise(resolve => setTimeout(resolve, 4000));
 
         // 快速提取商品資料
         const products = await page.evaluate(() => {
@@ -724,12 +732,18 @@ async function scrapePage(browser, pageNum) {
                         const imgSelectors = [
                             'img[src*="yahoo"]',
                             'img[src*="yimg"]', 
+                            'img[src*="img.yec.tw"]',
                             'img[data-src*="yahoo"]',
                             'img[data-src*="yimg"]',
+                            'img[data-src*="img.yec.tw"]',
                             'img[data-lazy-src*="yahoo"]',
                             'img[data-lazy-src*="yimg"]',
+                            'img[data-lazy-src*="img.yec.tw"]',
                             'img[src*="s.yimg.com"]',
                             'img[data-src*="s.yimg.com"]',
+                            'img[data-original*="yahoo"]',
+                            'img[data-original*="yimg"]',
+                            'img[data-original*="img.yec.tw"]',
                             'img[src]:not([src*="loading"]):not([src*="placeholder"]):not([src*="item-no-image"])',
                             'img[data-src]:not([data-src*="loading"]):not([data-src*="placeholder"])',
                             'img'
@@ -741,9 +755,11 @@ async function scrapePage(browser, pageNum) {
                                 // 優先使用 data-src（懶載入圖片）
                                 let src = imgElement.getAttribute('data-src') || 
                                          imgElement.getAttribute('data-lazy-src') ||
-                                         imgElement.getAttribute('src') ||
                                          imgElement.getAttribute('data-original') ||
-                                         imgElement.getAttribute('data-img');
+                                         imgElement.getAttribute('data-img') ||
+                                         imgElement.getAttribute('data-lazy') ||
+                                         imgElement.getAttribute('data-image') ||
+                                         imgElement.getAttribute('src');
                                 
                                 if (src && 
                                     !src.includes('item-no-image.svg') && 
@@ -779,7 +795,7 @@ async function scrapePage(browser, pageNum) {
                                          img.getAttribute('data-original');
                                          
                                 if (src && 
-                                    (src.includes('yahoo') || src.includes('yimg') || src.includes('s.yimg.com')) && 
+                                    (src.includes('yahoo') || src.includes('yimg') || src.includes('s.yimg.com') || src.includes('img.yec.tw')) && 
                                     !src.includes('loading') &&
                                     !src.includes('placeholder') &&
                                     !src.includes('item-no-image') &&
