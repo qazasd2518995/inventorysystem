@@ -640,7 +640,25 @@ async function scrapePage(browser, pageNum) {
             timeout: 30000 
         });
 
-        // 短暫等待確保商品完全載入
+        // 滾動頁面觸發懶載入圖片
+        await page.evaluate(() => {
+            return new Promise((resolve) => {
+                let totalHeight = 0;
+                const distance = 100;
+                const timer = setInterval(() => {
+                    const scrollHeight = document.body.scrollHeight;
+                    window.scrollBy(0, distance);
+                    totalHeight += distance;
+
+                    if(totalHeight >= scrollHeight){
+                        clearInterval(timer);
+                        resolve();
+                    }
+                }, 100);
+            });
+        });
+
+        // 短暫等待確保圖片載入
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // 快速提取商品資料
@@ -670,15 +688,61 @@ async function scrapePage(browser, pageNum) {
                         price = parseInt((priceMatch[1] || priceMatch[2] || priceMatch[3] || '0').replace(/,/g, ''));
                     }
                     
-                    // 圖片提取
+                    // 圖片提取 - 更全面的搜索
                     let imageUrl = '';
-                    const parentElement = linkElement.closest('div, li, tr, td') || linkElement.parentElement;
+                    const parentElement = linkElement.closest('div, li, tr, td, article') || linkElement.parentElement;
+                    
                     if (parentElement) {
-                        const imgElement = parentElement.querySelector('img');
-                        if (imgElement && imgElement.src && 
-                            !imgElement.src.includes('item-no-image.svg') && 
-                            !imgElement.src.includes('loading')) {
-                            imageUrl = imgElement.src;
+                        // 嘗試多種圖片選擇器
+                        const imgSelectors = [
+                            'img[src*="yahoo"]',
+                            'img[src*="yimg"]', 
+                            'img[data-src*="yahoo"]',
+                            'img[data-src*="yimg"]',
+                            'img[src]:not([src*="loading"]):not([src*="placeholder"]):not([src*="item-no-image"])',
+                            'img'
+                        ];
+                        
+                        for (const selector of imgSelectors) {
+                            const imgElement = parentElement.querySelector(selector);
+                            if (imgElement) {
+                                // 優先使用 data-src（懶載入圖片）
+                                let src = imgElement.getAttribute('data-src') || 
+                                         imgElement.getAttribute('src') ||
+                                         imgElement.getAttribute('data-original');
+                                
+                                if (src && 
+                                    !src.includes('item-no-image.svg') && 
+                                    !src.includes('loading') &&
+                                    !src.includes('placeholder') &&
+                                    src.length > 10) {
+                                    
+                                    // 確保是完整URL
+                                    if (src.startsWith('//')) {
+                                        src = 'https:' + src;
+                                    } else if (src.startsWith('/')) {
+                                        src = 'https://tw.bid.yahoo.com' + src;
+                                    }
+                                    
+                                    imageUrl = src;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // 如果還是沒找到，嘗試在更大範圍內搜索
+                        if (!imageUrl) {
+                            const allImages = parentElement.querySelectorAll('img');
+                            for (const img of allImages) {
+                                let src = img.getAttribute('data-src') || img.getAttribute('src');
+                                if (src && src.includes('yahoo') && !src.includes('loading')) {
+                                    if (src.startsWith('//')) {
+                                        src = 'https:' + src;
+                                    }
+                                    imageUrl = src;
+                                    break;
+                                }
+                            }
                         }
                     }
                     
@@ -692,6 +756,11 @@ async function scrapePage(browser, pageNum) {
                         url: productUrl,
                         scrapedAt: new Date().toISOString()
                     });
+                    
+                    // 調試：記錄前幾個商品的圖片情況
+                    if (items.length <= 3) {
+                        console.log(`商品 ${items.length} 圖片:`, imageUrl ? '有圖片' : '無圖片', imageUrl ? imageUrl.substring(0, 50) + '...' : '');
+                    }
                     
                 } catch (error) {
                     // 忽略個別商品錯誤，繼續處理
