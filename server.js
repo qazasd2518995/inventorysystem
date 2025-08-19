@@ -26,6 +26,9 @@ const {
     testConnection
 } = require('./database');
 
+// 引入資料庫爬蟲
+const { fetchYahooAuctionProductsWithDB } = require('./database_scraper');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -1610,10 +1613,10 @@ async function fetchYahooAuctionProductsProgressive() {
 
 // 爬蟲函數 - 使用 Puppeteer 抓取奇摩拍賣商品資料（完整版）
 async function fetchYahooAuctionProducts() {
-    // 使用快速並行抓取，大幅提升速度
-    return await fetchYahooAuctionProductsFast();
-    
-    let allProducts = [];
+    // 使用原始順序抓取（100%圖片成功率）+ 資料庫存儲
+    console.log('🔄 切換至資料庫整合版本...');
+    return await fetchYahooAuctionProductsWithDB();
+}
     let browser = null;
 
     try {
