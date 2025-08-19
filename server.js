@@ -7,6 +7,7 @@ const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 const puppeteer = require('puppeteer');
+const crypto = require('crypto');
 // const sharp = require('sharp'); // 移除sharp依賴以適合Vercel部署
 
 const app = express();
@@ -21,8 +22,134 @@ app.use(express.static('public'));
 let productsCache = [];
 let lastUpdateTime = null;
 let isUpdating = false; // 防止重複更新的旗標
+let lastFullScanTime = null; // 上次完整掃描時間
+let productHashMap = new Map(); // 商品雜湊對照表，用於快速檢測變更
 
 // 移除圖片下載和壓縮功能以適合Vercel部署
+
+// 產生商品雜湊值的函數
+function generateProductHash(product) {
+    const hashString = `${product.id}-${product.name}-${product.price}-${product.imageUrl}`;
+    return crypto.createHash('md5').update(hashString).digest('hex');
+}
+
+// 快速檢測商品變更的函數
+async function quickChangeDetection() {
+    console.log('正在進行快速變更檢測...');
+    let browser = null;
+    
+    try {
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu'
+            ],
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+        });
+
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // 只檢查前3頁來快速偵測變更
+        let changesDetected = false;
+        let newProductsCount = 0;
+        let modifiedProductsCount = 0;
+        
+        for (let currentPage = 1; currentPage <= 3; currentPage++) {
+            const pageUrl = currentPage === 1 
+                ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
+                : `https://tw.bid.yahoo.com/booth/Y1823944291?pg=${currentPage}`;
+            
+            await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // 簡化的滾動
+            await page.evaluate(() => {
+                window.scrollTo(0, document.body.scrollHeight);
+            });
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // 快速抓取商品資料
+            const products = await page.evaluate(() => {
+                const productList = [];
+                const selectors = ['a[href*="/item/"]', '[data-testid="item-card"]'];
+                
+                let productElements = [];
+                for (const selector of selectors) {
+                    productElements = document.querySelectorAll(selector);
+                    if (productElements.length > 0) break;
+                }
+                
+                productElements.forEach((element, index) => {
+                    if (index >= 60) return; // 限制每頁最多60個
+                    
+                    const link = element.href || element.querySelector('a')?.href;
+                    if (!link || !link.includes('/item/')) return;
+                    
+                    const id = link.match(/\/item\/(\d+)/)?.[1];
+                    if (!id) return;
+                    
+                    const name = element.textContent?.trim() || '';
+                    const priceMatch = name.match(/\$([0-9,]+)$/);
+                    const price = priceMatch ? parseInt(priceMatch[1].replace(/,/g, '')) : 0;
+                    
+                    const img = element.querySelector('img');
+                    let imageUrl = '';
+                    if (img) {
+                        imageUrl = img.src || img.dataset.src || img.dataset.original || '';
+                    }
+                    
+                    if (name && id) {
+                        productList.push({
+                            id,
+                            name,
+                            price,
+                            imageUrl,
+                            link
+                        });
+                    }
+                });
+                
+                return productList;
+            });
+            
+            // 檢查變更
+            for (const product of products) {
+                const newHash = generateProductHash(product);
+                const oldHash = productHashMap.get(product.id);
+                
+                if (!oldHash) {
+                    // 新商品
+                    newProductsCount++;
+                    changesDetected = true;
+                } else if (oldHash !== newHash) {
+                    // 商品已修改
+                    modifiedProductsCount++;
+                    changesDetected = true;
+                }
+            }
+            
+            if (changesDetected) break; // 發現變更就停止檢查
+        }
+        
+        console.log(`快速檢測結果: 新商品 ${newProductsCount} 個, 修改商品 ${modifiedProductsCount} 個`);
+        return { changesDetected, newProductsCount, modifiedProductsCount };
+        
+    } catch (error) {
+        console.error('快速變更檢測失敗:', error);
+        return { changesDetected: true, newProductsCount: 0, modifiedProductsCount: 0 }; // 發生錯誤時執行完整更新
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+}
 
 // 爬蟲函數 - 使用 Puppeteer 抓取奇摩拍賣商品資料
 async function fetchYahooAuctionProducts() {
@@ -397,6 +524,16 @@ async function fetchYahooAuctionProducts() {
 
         productsCache = productsWithTime;
         lastUpdateTime = new Date();
+        lastFullScanTime = new Date();
+        
+        // 更新商品雜湊對照表
+        productHashMap.clear();
+        productsWithTime.forEach(product => {
+            const hash = generateProductHash(product);
+            productHashMap.set(product.id, hash);
+        });
+        
+        console.log(`已更新商品雜湊對照表，共 ${productHashMap.size} 個商品`);
         
         return productsWithTime;
 
@@ -464,24 +601,45 @@ function generateTestData() {
     ];
 }
 
-// API路由 - 取得商品列表
+// API路由 - 取得商品列表（智慧更新）
 app.get('/api/products', async (req, res) => {
     try {
-        // 如果快取為空或超過5分鐘，重新抓取
-        if (!isUpdating && (productsCache.length === 0 || 
-            !lastUpdateTime || 
-            (new Date() - lastUpdateTime) > 5 * 60 * 1000)) {
-            
+        const forceFullUpdate = req.query.full === 'true'; // 允許強制完整更新
+        const now = new Date();
+        
+        // 首次載入或強制完整更新
+        if (!isUpdating && (productsCache.length === 0 || forceFullUpdate)) {
             isUpdating = true;
-            console.log('開始抓取商品資料...');
+            console.log('執行完整商品抓取...');
             try {
                 await fetchYahooAuctionProducts();
                 
-                // 如果抓取失敗，使用測試資料
                 if (productsCache.length === 0) {
                     console.log('抓取失敗，使用測試資料');
                     productsCache = generateTestData();
                     lastUpdateTime = new Date();
+                }
+            } finally {
+                isUpdating = false;
+            }
+        }
+        // 智慧更新邏輯：超過5分鐘且距離上次完整掃描超過2小時，或超過30分鐘
+        else if (!isUpdating && lastUpdateTime && 
+                ((now - lastUpdateTime) > 5 * 60 * 1000 && 
+                 (!lastFullScanTime || (now - lastFullScanTime) > 2 * 60 * 60 * 1000)) ||
+                (now - lastUpdateTime) > 30 * 60 * 1000) {
+            
+            isUpdating = true;
+            try {
+                // 先進行快速變更檢測
+                const { changesDetected } = await quickChangeDetection();
+                
+                if (changesDetected) {
+                    console.log('檢測到商品變更，執行完整更新...');
+                    await fetchYahooAuctionProducts();
+                } else {
+                    console.log('未檢測到商品變更，跳過完整更新');
+                    lastUpdateTime = new Date(); // 更新檢查時間
                 }
             } finally {
                 isUpdating = false;
@@ -492,10 +650,75 @@ app.get('/api/products', async (req, res) => {
             success: true,
             products: productsCache,
             lastUpdate: lastUpdateTime,
+            lastFullScan: lastFullScanTime,
             total: productsCache.length
         });
     } catch (error) {
         console.error('API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API路由 - 手動快速檢測更新
+app.get('/api/check-updates', async (req, res) => {
+    try {
+        if (isUpdating) {
+            return res.json({
+                success: false,
+                message: '系統正在更新中，請稍後再試'
+            });
+        }
+
+        const { changesDetected, newProductsCount, modifiedProductsCount } = await quickChangeDetection();
+        
+        res.json({
+            success: true,
+            changesDetected,
+            newProductsCount,
+            modifiedProductsCount,
+            message: changesDetected ? 
+                `發現變更：新增 ${newProductsCount} 個商品，修改 ${modifiedProductsCount} 個商品` :
+                '未發現商品變更'
+        });
+    } catch (error) {
+        console.error('快速檢測 API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API路由 - 手動觸發完整更新
+app.get('/api/force-update', async (req, res) => {
+    try {
+        if (isUpdating) {
+            return res.json({
+                success: false,
+                message: '系統正在更新中，請稍後再試'
+            });
+        }
+
+        isUpdating = true;
+        console.log('手動觸發完整更新...');
+        
+        try {
+            await fetchYahooAuctionProducts();
+            res.json({
+                success: true,
+                message: `完整更新完成，共 ${productsCache.length} 個商品`,
+                total: productsCache.length,
+                lastUpdate: lastUpdateTime
+            });
+        } finally {
+            isUpdating = false;
+        }
+    } catch (error) {
+        isUpdating = false;
+        console.error('強制更新 API 錯誤:', error);
         res.status(500).json({
             success: false,
             error: error.message
