@@ -285,224 +285,22 @@ async function quickChangeDetection() {
     }
 }
 
-// 全面檢測商品變更的函數（檢查所有頁面）
+// 全面檢測商品變更的函數（使用漸進式抓取）
 async function fullChangeDetection() {
-    console.log('正在進行全面商品變更檢測...');
-    let browser = null;
+    console.log('正在進行全面商品變更檢測（漸進式）...');
     
-    try {
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--single-process'
-            ],
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            timeout: 60000
-        });
-
-        const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-        let changesDetected = false;
-        let newProductsCount = 0;
-        let modifiedProductsCount = 0;
-        let removedProductsCount = 0;
-        let allCurrentProducts = [];
-        let currentPage = 1;
-        const maxPages = 50; // 安全上限
-
-        // 檢查所有頁面
-        while (currentPage <= maxPages) {
-            console.log(`全面檢測第 ${currentPage} 頁...`);
-            
-            const url = `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&p=${currentPage}&mode=list`;
-            
-            try {
-                await page.goto(url, { 
-                    waitUntil: 'networkidle2',
-                    timeout: 90000 
-                });
-
-                // 滾動頁面確保所有商品載入
-                await page.evaluate(() => {
-                    return new Promise((resolve) => {
-                        let totalHeight = 0;
-                        const distance = 200;
-                        const timer = setInterval(() => {
-                            const scrollHeight = document.body.scrollHeight;
-                            window.scrollBy(0, distance);
-                            totalHeight += distance;
-
-                            if (totalHeight >= scrollHeight) {
-                                clearInterval(timer);
-                                resolve();
-                            }
-                        }, 100);
-                    });
-                });
-
-                // 等待頁面完全載入
-                await new Promise(resolve => setTimeout(resolve, 2000));
-
-                // 提取商品資料
-                const products = await page.evaluate(() => {
-                    const items = [];
-                    const productElements = document.querySelectorAll('.item');
-                    
-                    productElements.forEach(element => {
-                        try {
-                            const linkElement = element.querySelector('a[href*="item/"]');
-                            if (!linkElement) return;
-                            
-                            const href = linkElement.getAttribute('href');
-                            const match = href.match(/item\/([^?]+)/);
-                            if (!match) return;
-                            
-                            const id = match[1];
-                            const nameElement = element.querySelector('.name a, .title a, [title]');
-                            const name = nameElement ? (nameElement.textContent || nameElement.getAttribute('title') || '').trim() : '';
-                            
-                            if (name && id) {
-                                // 價格提取
-                                const priceText = name;
-                                let price = 0;
-                                const priceMatch = priceText.match(/\$?([\d,]+)/);
-                                if (priceMatch) {
-                                    price = parseInt(priceMatch[1].replace(/,/g, ''));
-                                }
-                                
-                                // 圖片提取
-                                const imgElement = element.querySelector('img');
-                                const imageUrl = imgElement ? imgElement.src : '';
-                                
-                                const link = `https://tw.bid.yahoo.com${href}`;
-                                
-                                items.push({ id, name, price, imageUrl, link });
-                            }
-                        } catch (error) {
-                            console.error('解析商品時發生錯誤:', error);
-                        }
-                    });
-                    
-                    return items;
-                });
-
-                console.log(`第 ${currentPage} 頁找到 ${products.length} 個商品`);
-
-                // 如果沒有商品或商品數量太少，可能已到最後一頁
-                if (products.length === 0) {
-                    console.log(`第 ${currentPage} 頁無商品，停止檢測`);
-                    break;
-                }
-
-                // 將商品添加到總列表
-                allCurrentProducts = allCurrentProducts.concat(products);
-
-                // 檢查每個商品是否有變更
-                for (const product of products) {
-                    const newHash = generateProductHash(product);
-                    const oldHash = productHashMap.get(product.id);
-                    
-                    if (!oldHash) {
-                        // 新商品
-                        newProductsCount++;
-                        changesDetected = true;
-                        console.log(`發現新商品: ${product.name} (ID: ${product.id})`);
-                    } else if (oldHash !== newHash) {
-                        // 修改的商品
-                        modifiedProductsCount++;
-                        changesDetected = true;
-                        console.log(`發現商品變更: ${product.name} (ID: ${product.id})`);
-                    }
-                }
-
-                // 檢查是否還有下一頁
-                const hasNextPage = await page.evaluate(() => {
-                    // 檢查分頁連結
-                    const nextLinks = document.querySelectorAll('a');
-                    for (let link of nextLinks) {
-                        if (link.textContent.includes('下一頁') || link.textContent.includes('Next')) {
-                            return true;
-                        }
-                    }
-                    
-                    // 檢查頁碼
-                    const pageLinks = document.querySelectorAll('a[href*="&p="]');
-                    const currentPageNum = parseInt(window.location.search.match(/[?&]p=(\d+)/)?.[1] || '1');
-                    
-                    for (let link of pageLinks) {
-                        const pageMatch = link.href.match(/[?&]p=(\d+)/);
-                        if (pageMatch && parseInt(pageMatch[1]) > currentPageNum) {
-                            return true;
-                        }
-                    }
-                    
-                    return false;
-                });
-
-                if (!hasNextPage) {
-                    console.log(`第 ${currentPage} 頁為最後一頁，停止檢測`);
-                    break;
-                }
-
-                currentPage++;
-                // 避免請求過快
-                await new Promise(resolve => setTimeout(resolve, 1000));
-
-            } catch (pageError) {
-                console.error(`檢測第 ${currentPage} 頁時發生錯誤:`, pageError);
-                break;
-            }
-        }
-
-        // 檢查已移除的商品
-        const currentProductIds = new Set(allCurrentProducts.map(p => p.id));
-        for (const [oldId, oldHash] of productHashMap) {
-            if (!currentProductIds.has(oldId)) {
-                removedProductsCount++;
-                changesDetected = true;
-                console.log(`發現商品已移除: ID ${oldId}`);
-            }
-        }
-
-        console.log(`全面檢測結果: 檢查了 ${currentPage - 1} 頁，共 ${allCurrentProducts.length} 個商品`);
-        console.log(`變更統計: 新增 ${newProductsCount} 個, 修改 ${modifiedProductsCount} 個, 移除 ${removedProductsCount} 個`);
-        
-        return { 
-            changesDetected, 
-            newProductsCount, 
-            modifiedProductsCount, 
-            removedProductsCount,
-            totalProducts: allCurrentProducts.length,
-            totalPages: currentPage - 1,
-            currentProducts: allCurrentProducts
-        };
-
-    } catch (error) {
-        console.error('全面變更檢測失敗:', error);
-        return { 
-            changesDetected: true, 
-            newProductsCount: 0, 
-            modifiedProductsCount: 0, 
-            removedProductsCount: 0,
-            totalProducts: 0,
-            totalPages: 0,
-            currentProducts: []
-        };
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
-    }
+    // 直接使用漸進式抓取，它會自動更新快取並記錄變更
+    const result = await fetchYahooAuctionProductsProgressive();
+    
+    return {
+        changesDetected: true, // 總是返回有變更，因為漸進式抓取會處理變更檢測
+        newProductsCount: 0, // 這些數字會在漸進式抓取中處理
+        modifiedProductsCount: 0,
+        removedProductsCount: 0,
+        totalProducts: result.length,
+        totalPages: Math.ceil(result.length / 60), // 估算頁數
+        currentProducts: result
+    };
 }
 
 // 部分更新商品資料的函數
@@ -723,13 +521,265 @@ async function fetchYahooAuctionProductsLight(maxPages = 5) {
     }
 }
 
+// 漸進式抓取函數 - 邊抓取邊更新，適合Render環境
+async function fetchYahooAuctionProductsProgressive() {
+    let allProducts = [];
+    let browser = null;
+    let currentPage = 1;
+    const maxPages = 50; // 安全上限
+    const updateInterval = 3; // 每3頁更新一次快取
+
+    try {
+        console.log('開始漸進式抓取所有商品...');
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--single-process',
+                '--memory-pressure-off'
+            ],
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            timeout: 60000
+        });
+
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1024, height: 768 });
+        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        while (currentPage <= maxPages) {
+            console.log(`正在載入第 ${currentPage} 頁...`);
+            
+            const pageUrl = currentPage === 1 
+                ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
+                : `https://tw.bid.yahoo.com/booth/Y1823944291?pg=${currentPage}`;
+            
+            try {
+                await page.goto(pageUrl, { 
+                    waitUntil: 'networkidle2',
+                    timeout: 90000 
+                });
+
+                // 等待頁面載入
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                // 滾動頁面確保所有商品載入
+                await page.evaluate(() => {
+                    return new Promise((resolve) => {
+                        let totalHeight = 0;
+                        const distance = 200;
+                        const timer = setInterval(() => {
+                            const scrollHeight = document.body.scrollHeight;
+                            window.scrollBy(0, distance);
+                            totalHeight += distance;
+
+                            if (totalHeight >= scrollHeight) {
+                                clearInterval(timer);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                });
+
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                console.log(`正在抓取第 ${currentPage} 頁商品資料...`);
+
+                const products = await page.evaluate(() => {
+                    const items = [];
+                    const productElements = document.querySelectorAll('.item');
+                    
+                    productElements.forEach(element => {
+                        try {
+                            const linkElement = element.querySelector('a[href*="item/"]');
+                            if (!linkElement) return;
+                            
+                            const href = linkElement.getAttribute('href');
+                            const match = href.match(/item\/([^?]+)/);
+                            if (!match) return;
+                            
+                            const id = match[1];
+                            const nameElement = element.querySelector('.name a, .title a, [title]');
+                            const name = nameElement ? (nameElement.textContent || nameElement.getAttribute('title') || '').trim() : '';
+                            
+                            if (name && id) {
+                                // 價格提取
+                                const priceText = name;
+                                let price = 0;
+                                const priceMatch = priceText.match(/\$?([\d,]+)/);
+                                if (priceMatch) {
+                                    price = parseInt(priceMatch[1].replace(/,/g, ''));
+                                }
+                                
+                                // 圖片提取
+                                let imageUrl = '';
+                                const imgElement = element.querySelector('img');
+                                if (imgElement && imgElement.src && !imgElement.src.includes('item-no-image.svg')) {
+                                    imageUrl = imgElement.src;
+                                } else {
+                                    // 尋找其他可能的圖片
+                                    const allImgs = element.querySelectorAll('img');
+                                    for (let img of allImgs) {
+                                        if (img.src && !img.src.includes('item-no-image.svg') && !img.src.includes('loading')) {
+                                            imageUrl = img.src;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                if (!imageUrl) {
+                                    imageUrl = 'https://via.placeholder.com/150x150?text=無圖片';
+                                }
+                                
+                                const link = `https://tw.bid.yahoo.com${href}`;
+                                
+                                items.push({ id, name, price, imageUrl, link });
+                            }
+                        } catch (error) {
+                            console.error('解析商品時發生錯誤:', error);
+                        }
+                    });
+                    
+                    return items;
+                });
+
+                console.log(`第 ${currentPage} 頁找到 ${products.length} 個商品`);
+                allProducts = allProducts.concat(products);
+
+                // 每隔幾頁更新一次快取，讓用戶看到即時進度
+                if (currentPage % updateInterval === 0 || products.length === 0) {
+                    const productsWithTime = allProducts.map(product => ({
+                        ...product,
+                        updateTime: new Date().toISOString()
+                    }));
+                    
+                    // 更新快取
+                    productsCache = productsWithTime;
+                    lastUpdateTime = new Date();
+                    
+                    // 更新雜湊對照表
+                    productHashMap.clear();
+                    productsWithTime.forEach(product => {
+                        const hash = generateProductHash(product);
+                        productHashMap.set(product.id, hash);
+                    });
+                    
+                    addUpdateLog('info', `漸進式更新：已抓取 ${allProducts.length} 個商品（第 ${currentPage} 頁）`);
+                    console.log(`已更新快取：${allProducts.length} 個商品`);
+                }
+
+                // 檢查是否還有下一頁
+                const hasNextPage = await page.evaluate(() => {
+                    // 檢查分頁連結
+                    const nextLinks = document.querySelectorAll('a');
+                    for (let link of nextLinks) {
+                        if (link.textContent.includes('下一頁') || link.textContent.includes('Next')) {
+                            return true;
+                        }
+                    }
+                    
+                    // 檢查頁碼
+                    const pageLinks = document.querySelectorAll('a[href*="&pg="], a[href*="?pg="]');
+                    const currentPageNum = parseInt(window.location.search.match(/[?&]pg=(\d+)/)?.[1] || '1');
+                    
+                    for (let link of pageLinks) {
+                        const pageMatch = link.href.match(/[?&]pg=(\d+)/);
+                        if (pageMatch && parseInt(pageMatch[1]) > currentPageNum) {
+                            return true;
+                        }
+                    }
+                    
+                    return false;
+                });
+
+                // 如果沒有商品或沒有下一頁，停止抓取
+                if (products.length === 0 || !hasNextPage) {
+                    console.log(`第 ${currentPage} 頁為最後一頁，停止抓取`);
+                    break;
+                }
+
+                currentPage++;
+                
+                // 避免請求過快
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+            } catch (pageError) {
+                console.error(`抓取第 ${currentPage} 頁時發生錯誤:`, pageError);
+                
+                // 如果是超時錯誤，嘗試繼續下一頁
+                if (pageError.message.includes('timeout') || pageError.message.includes('Navigation')) {
+                    console.log('頁面超時，嘗試繼續下一頁...');
+                    currentPage++;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        console.log(`漸進式抓取完成！總共成功抓取 ${allProducts.length} 個商品，共 ${currentPage - 1} 頁`);
+        
+        // 最終更新
+        const productsWithTime = allProducts.map(product => ({
+            ...product,
+            updateTime: new Date().toISOString()
+        }));
+
+        // 比較商品變更並記錄日誌
+        if (productsCache.length > 0) {
+            addUpdateLog('info', '開始比較商品變更...');
+            compareAndLogChanges(productsCache, productsWithTime);
+        } else {
+            addUpdateLog('success', `漸進式抓取完成：共 ${productsWithTime.length} 個商品`);
+        }
+
+        productsCache = productsWithTime;
+        lastUpdateTime = new Date();
+        lastFullScanTime = new Date();
+        
+        // 更新商品雜湊對照表
+        productHashMap.clear();
+        productsWithTime.forEach(product => {
+            const hash = generateProductHash(product);
+            productHashMap.set(product.id, hash);
+        });
+        
+        console.log(`已更新商品雜湊對照表，共 ${productHashMap.size} 個商品`);
+        
+        return productsWithTime;
+
+    } catch (error) {
+        console.error('漸進式抓取商品資料時發生錯誤:', error.message);
+        addUpdateLog('error', `漸進式抓取失敗: ${error.message}`);
+        
+        // 如果抓取失敗，保持現有資料
+        if (productsCache.length === 0) {
+            console.log('抓取失敗且無現有資料，使用測試資料');
+            productsCache = generateTestData();
+            lastUpdateTime = new Date();
+        } else {
+            console.log(`抓取失敗但保持現有資料：${productsCache.length} 個商品`);
+        }
+        
+        return productsCache;
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+}
+
 // 爬蟲函數 - 使用 Puppeteer 抓取奇摩拍賣商品資料（完整版）
 async function fetchYahooAuctionProducts() {
-    // 在Render環境中使用輕量模式
-    if (process.env.RENDER) {
-        console.log('檢測到Render環境，使用輕量模式');
-        return await fetchYahooAuctionProductsLight(10); // 最多10頁
-    }
+    // 使用漸進式抓取，適合所有環境
+    return await fetchYahooAuctionProductsProgressive();
     
     let allProducts = [];
     let browser = null;
