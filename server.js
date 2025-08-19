@@ -748,74 +748,12 @@ async function fetchYahooAuctionProductsProgressive() {
                         }
                     }
                     
-                    // 嘗試多種選擇器
-                    let productElements = document.querySelectorAll('.item');
-                    console.log('嘗試 .item:', productElements.length);
+                    // 直接使用商品連結進行解析（最可靠的方法）
+                    const itemLinks = document.querySelectorAll('a[href*="item/"]');
+                    console.log('找到商品連結數量:', itemLinks.length);
                     
-                    if (productElements.length === 0) {
-                        productElements = document.querySelectorAll('[data-item-id]');
-                        console.log('嘗試 [data-item-id]:', productElements.length);
-                    }
-                    if (productElements.length === 0) {
-                        productElements = document.querySelectorAll('.product-item, .auction-item, .list-item');
-                        console.log('嘗試 .product-item 等:', productElements.length);
-                    }
-                    if (productElements.length === 0) {
-                        const linkElements = document.querySelectorAll('a[href*="/item/"]');
-                        console.log('找到商品連結:', linkElements.length);
-                        productElements = Array.from(linkElements).map(link => link.closest('div, li, tr') || link.parentElement).filter(Boolean);
-                        console.log('轉換為商品元素:', productElements.length);
-                    }
-                    
-                    // 如果還是找不到，嘗試更廣泛的搜索
-                    if (productElements.length === 0) {
-                        const allLinks = document.querySelectorAll('a[href*="item"]');
-                        console.log('所有包含 item 的連結:', allLinks.length);
-                        
-                        // 輸出前幾個連結供調試
-                        for (let i = 0; i < Math.min(5, allLinks.length); i++) {
-                            console.log(`連結 ${i + 1}:`, allLinks[i].href);
-                        }
-                        
-                        productElements = Array.from(allLinks).map(link => link.closest('div, li, tr, td') || link.parentElement).filter(Boolean);
-                        console.log('廣泛搜索找到商品元素:', productElements.length);
-                    }
-                    
-                    // 如果仍然找不到商品，輸出頁面的基本結構用於調試
-                    if (productElements.length === 0) {
-                        console.log('=== 頁面結構調試 ===');
-                        console.log('Body 類名:', document.body.className);
-                        console.log('Body ID:', document.body.id);
-                        
-                        // 檢查是否有錯誤訊息
-                        const errorElements = document.querySelectorAll('.error, .alert, .warning, [class*="error"]');
-                        if (errorElements.length > 0) {
-                            console.log('發現錯誤元素:', errorElements.length);
-                            errorElements.forEach((el, i) => {
-                                console.log(`錯誤 ${i + 1}:`, el.textContent.trim());
-                            });
-                        }
-                        
-                        // 輸出頁面的主要結構
-                        const mainElements = document.querySelectorAll('main, #main, .main, .content, #content');
-                        mainElements.forEach((el, i) => {
-                            console.log(`主要內容區 ${i + 1}:`, el.tagName, el.className, '子元素數:', el.children.length);
-                        });
-                        
-                        // 檢查是否需要登入
-                        const loginElements = document.querySelectorAll('input[type="password"], .login, .signin, [class*="login"]');
-                        if (loginElements.length > 0) {
-                            console.log('可能需要登入，找到登入相關元素:', loginElements.length);
-                        }
-                    }
-                    
-                    console.log(`最終找到 ${productElements.length} 個商品元素`);
-                    
-                    // 如果找不到商品元素，直接使用商品連結
-                    if (productElements.length === 0) {
+                    if (itemLinks.length > 0) {
                         console.log('使用直接連結解析方法...');
-                        const itemLinks = document.querySelectorAll('a[href*="item/"]');
-                        console.log('直接解析', itemLinks.length, '個商品連結');
                         
                         itemLinks.forEach((linkElement, index) => {
                             try {
@@ -890,6 +828,40 @@ async function fetchYahooAuctionProductsProgressive() {
                         console.log(`直接解析成功 ${items.length} 個商品`);
                         return items;
                     }
+                    
+                    // 備用方法：嘗試多種選擇器（如果沒有找到連結）
+                    let productElements = document.querySelectorAll('.item, [data-item-id], .product-item, .auction-item, .list-item');
+                    console.log('備用方法：找到商品元素:', productElements.length);
+                    
+                    // 如果仍然找不到商品，輸出頁面的基本結構用於調試
+                    if (productElements.length === 0) {
+                        console.log('=== 頁面結構調試 ===');
+                        console.log('Body 類名:', document.body.className);
+                        console.log('Body ID:', document.body.id);
+                        
+                        // 檢查是否有錯誤訊息
+                        const errorElements = document.querySelectorAll('.error, .alert, .warning, [class*="error"]');
+                        if (errorElements.length > 0) {
+                            console.log('發現錯誤元素:', errorElements.length);
+                            errorElements.forEach((el, i) => {
+                                console.log(`錯誤 ${i + 1}:`, el.textContent.trim());
+                            });
+                        }
+                        
+                        // 輸出頁面的主要結構
+                        const mainElements = document.querySelectorAll('main, #main, .main, .content, #content');
+                        mainElements.forEach((el, i) => {
+                            console.log(`主要內容區 ${i + 1}:`, el.tagName, el.className, '子元素數:', el.children.length);
+                        });
+                        
+                        // 檢查是否需要登入
+                        const loginElements = document.querySelectorAll('input[type="password"], .login, .signin, [class*="login"]');
+                        if (loginElements.length > 0) {
+                            console.log('可能需要登入，找到登入相關元素:', loginElements.length);
+                        }
+                    }
+                    
+                    console.log(`備用方法找到 ${productElements.length} 個商品元素`);
                     
                     productElements.forEach((element, index) => {
                         try {
