@@ -590,24 +590,54 @@ async function fetchYahooAuctionProductsProgressive() {
 
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
+                // 調試：檢查頁面是否正確載入
+                const pageTitle = await page.title();
+                const pageUrl = await page.url();
+                console.log(`頁面載入完成 - 標題: ${pageTitle}, URL: ${pageUrl}`);
+                
                 console.log(`正在抓取第 ${currentPage} 頁商品資料...`);
 
                 const products = await page.evaluate(() => {
                     const items = [];
                     
+                    // 調試：查看頁面結構
+                    console.log('頁面標題:', document.title);
+                    console.log('頁面URL:', window.location.href);
+                    
                     // 嘗試多種選擇器
                     let productElements = document.querySelectorAll('.item');
+                    console.log('嘗試 .item:', productElements.length);
+                    
                     if (productElements.length === 0) {
                         productElements = document.querySelectorAll('[data-item-id]');
+                        console.log('嘗試 [data-item-id]:', productElements.length);
                     }
                     if (productElements.length === 0) {
                         productElements = document.querySelectorAll('.product-item, .auction-item, .list-item');
+                        console.log('嘗試 .product-item 等:', productElements.length);
                     }
                     if (productElements.length === 0) {
-                        productElements = document.querySelectorAll('a[href*="/item/"]').map(link => link.closest('div, li, tr') || link.parentElement).filter(Boolean);
+                        const linkElements = document.querySelectorAll('a[href*="/item/"]');
+                        console.log('找到商品連結:', linkElements.length);
+                        productElements = Array.from(linkElements).map(link => link.closest('div, li, tr') || link.parentElement).filter(Boolean);
+                        console.log('轉換為商品元素:', productElements.length);
                     }
                     
-                    console.log(`找到 ${productElements.length} 個商品元素`);
+                    // 如果還是找不到，嘗試更廣泛的搜索
+                    if (productElements.length === 0) {
+                        const allLinks = document.querySelectorAll('a[href*="item"]');
+                        console.log('所有包含 item 的連結:', allLinks.length);
+                        
+                        // 輸出前幾個連結供調試
+                        for (let i = 0; i < Math.min(5, allLinks.length); i++) {
+                            console.log(`連結 ${i + 1}:`, allLinks[i].href);
+                        }
+                        
+                        productElements = Array.from(allLinks).map(link => link.closest('div, li, tr, td') || link.parentElement).filter(Boolean);
+                        console.log('廣泛搜索找到商品元素:', productElements.length);
+                    }
+                    
+                    console.log(`最終找到 ${productElements.length} 個商品元素`);
                     
                     productElements.forEach((element, index) => {
                         try {
@@ -1875,3 +1905,4 @@ if (require.main === module) {
 
 // 導出app以供Vercel使用
 module.exports = app;
+
