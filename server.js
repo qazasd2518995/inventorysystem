@@ -2398,7 +2398,7 @@ app.get('/api/export', requireAuth, async (req, res) => {
         // 設定響應頭
         const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename="整合商品清單_${timestamp}.xlsx"`);
+        res.setHeader('Content-Disposition', `attachment; filename="products_${timestamp}.xlsx"`);
 
         // 將工作簿寫入響應
         await workbook.xlsx.write(res);
