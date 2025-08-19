@@ -1,5 +1,5 @@
-# 使用官方 Node.js 鏡像
-FROM node:18-slim
+# 使用官方 Node.js 鏡像 - 更新到 Node.js 20
+FROM node:20-slim
 
 # 安裝 Chrome 依賴
 RUN apt-get update && apt-get install -y \
