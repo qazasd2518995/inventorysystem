@@ -586,6 +586,25 @@ async function fetchYahooAuctionProductsProgressive() {
                 // 等待頁面載入
                 await new Promise(resolve => setTimeout(resolve, 3000));
                 
+                // 檢查是否有載入指示器或需要更多等待時間
+                const hasLoading = await page.evaluate(() => {
+                    const loadingElements = document.querySelectorAll('.loading, .spinner, [class*="load"]');
+                    const hasLoadingClass = loadingElements.length > 0;
+                    const bodyText = document.body.textContent || '';
+                    const hasLoadingText = bodyText.includes('載入中') || bodyText.includes('loading') || bodyText.includes('請稍候');
+                    
+                    console.log('載入指示器數量:', loadingElements.length);
+                    console.log('是否包含載入文字:', hasLoadingText);
+                    console.log('頁面內容長度:', bodyText.length);
+                    
+                    return hasLoadingClass || hasLoadingText;
+                });
+                
+                if (hasLoading) {
+                    console.log('檢測到載入指示器，額外等待5秒...');
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                }
+                
                 // 滾動頁面確保所有商品載入
                 await page.evaluate(() => {
                     return new Promise((resolve) => {
@@ -619,6 +638,33 @@ async function fetchYahooAuctionProductsProgressive() {
                     // 調試：查看頁面結構
                     console.log('頁面標題:', document.title);
                     console.log('頁面URL:', window.location.href);
+                    console.log('頁面HTML長度:', document.documentElement.outerHTML.length);
+                    
+                    // 檢查是否有常見的商品容器
+                    const possibleContainers = [
+                        'main', '#main', '.main-content', '.content',
+                        '.product-list', '.item-list', '.auction-list',
+                        '.results', '.search-results', '.booth-items'
+                    ];
+                    
+                    possibleContainers.forEach(selector => {
+                        const container = document.querySelector(selector);
+                        if (container) {
+                            console.log(`找到容器 ${selector}:`, container.children.length, '個子元素');
+                        }
+                    });
+                    
+                    // 檢查所有包含商品ID的連結
+                    const allItemLinks = document.querySelectorAll('a[href*="item/"], a[href*="auction/"]');
+                    console.log('所有商品相關連結數量:', allItemLinks.length);
+                    
+                    if (allItemLinks.length > 0) {
+                        console.log('前3個商品連結:');
+                        for (let i = 0; i < Math.min(3, allItemLinks.length); i++) {
+                            console.log(`  ${i + 1}. ${allItemLinks[i].href}`);
+                            console.log(`     文字: ${allItemLinks[i].textContent.trim().substring(0, 50)}`);
+                        }
+                    }
                     
                     // 嘗試多種選擇器
                     let productElements = document.querySelectorAll('.item');
@@ -651,6 +697,34 @@ async function fetchYahooAuctionProductsProgressive() {
                         
                         productElements = Array.from(allLinks).map(link => link.closest('div, li, tr, td') || link.parentElement).filter(Boolean);
                         console.log('廣泛搜索找到商品元素:', productElements.length);
+                    }
+                    
+                    // 如果仍然找不到商品，輸出頁面的基本結構用於調試
+                    if (productElements.length === 0) {
+                        console.log('=== 頁面結構調試 ===');
+                        console.log('Body 類名:', document.body.className);
+                        console.log('Body ID:', document.body.id);
+                        
+                        // 檢查是否有錯誤訊息
+                        const errorElements = document.querySelectorAll('.error, .alert, .warning, [class*="error"]');
+                        if (errorElements.length > 0) {
+                            console.log('發現錯誤元素:', errorElements.length);
+                            errorElements.forEach((el, i) => {
+                                console.log(`錯誤 ${i + 1}:`, el.textContent.trim());
+                            });
+                        }
+                        
+                        // 輸出頁面的主要結構
+                        const mainElements = document.querySelectorAll('main, #main, .main, .content, #content');
+                        mainElements.forEach((el, i) => {
+                            console.log(`主要內容區 ${i + 1}:`, el.tagName, el.className, '子元素數:', el.children.length);
+                        });
+                        
+                        // 檢查是否需要登入
+                        const loginElements = document.querySelectorAll('input[type="password"], .login, .signin, [class*="login"]');
+                        if (loginElements.length > 0) {
+                            console.log('可能需要登入，找到登入相關元素:', loginElements.length);
+                        }
                     }
                     
                     console.log(`最終找到 ${productElements.length} 個商品元素`);
