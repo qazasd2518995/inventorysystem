@@ -559,7 +559,7 @@ async function fetchYahooAuctionProductsProgressive() {
             
             const pageUrl = currentPage === 1 
                 ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
-                : `https://tw.bid.yahoo.com/booth/Y1823944291?pg=${currentPage}`;
+                : `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&pg=${currentPage}&mode=list`;
             
             try {
                 await page.goto(pageUrl, { 
@@ -594,11 +594,29 @@ async function fetchYahooAuctionProductsProgressive() {
 
                 const products = await page.evaluate(() => {
                     const items = [];
-                    const productElements = document.querySelectorAll('.item');
                     
-                    productElements.forEach(element => {
+                    // 嘗試多種選擇器
+                    let productElements = document.querySelectorAll('.item');
+                    if (productElements.length === 0) {
+                        productElements = document.querySelectorAll('[data-item-id]');
+                    }
+                    if (productElements.length === 0) {
+                        productElements = document.querySelectorAll('.product-item, .auction-item, .list-item');
+                    }
+                    if (productElements.length === 0) {
+                        productElements = document.querySelectorAll('a[href*="/item/"]').map(link => link.closest('div, li, tr') || link.parentElement).filter(Boolean);
+                    }
+                    
+                    console.log(`找到 ${productElements.length} 個商品元素`);
+                    
+                    productElements.forEach((element, index) => {
                         try {
-                            const linkElement = element.querySelector('a[href*="item/"]');
+                            // 尋找商品連結
+                            let linkElement = element.querySelector('a[href*="item/"]');
+                            if (!linkElement && element.tagName === 'A' && element.href.includes('item/')) {
+                                linkElement = element;
+                            }
+                            
                             if (!linkElement) return;
                             
                             const href = linkElement.getAttribute('href');
@@ -606,16 +624,62 @@ async function fetchYahooAuctionProductsProgressive() {
                             if (!match) return;
                             
                             const id = match[1];
-                            const nameElement = element.querySelector('.name a, .title a, [title]');
-                            const name = nameElement ? (nameElement.textContent || nameElement.getAttribute('title') || '').trim() : '';
+                            
+                            // 嘗試多種方式獲取商品名稱
+                            let name = '';
+                            const nameSelectors = [
+                                '.name a', '.title a', '[title]',
+                                '.product-title', '.auction-title',
+                                'h3 a', 'h4 a', '.item-title',
+                                linkElement.getAttribute('title'),
+                                linkElement.textContent
+                            ];
+                            
+                            for (const selector of nameSelectors) {
+                                if (typeof selector === 'string') {
+                                    const nameElement = element.querySelector(selector);
+                                    if (nameElement) {
+                                        name = nameElement.textContent || nameElement.getAttribute('title') || '';
+                                        if (name.trim()) break;
+                                    }
+                                } else if (selector) {
+                                    name = selector;
+                                    if (name.trim()) break;
+                                }
+                            }
+                            
+                            name = name.trim();
                             
                             if (name && id) {
-                                // 價格提取
-                                const priceText = name;
+                                // 價格提取 - 從名稱中提取
                                 let price = 0;
-                                const priceMatch = priceText.match(/\$?([\d,]+)/);
-                                if (priceMatch) {
-                                    price = parseInt(priceMatch[1].replace(/,/g, ''));
+                                const pricePatterns = [
+                                    /\$\s?([\d,]+)/,
+                                    /NT\$\s?([\d,]+)/,
+                                    /價格[：:]\s?([\d,]+)/,
+                                    /售價[：:]\s?([\d,]+)/,
+                                    /([\d,]+)\s?元/,
+                                    /^([\d,]+)$/
+                                ];
+                                
+                                for (const pattern of pricePatterns) {
+                                    const priceMatch = name.match(pattern);
+                                    if (priceMatch) {
+                                        price = parseInt(priceMatch[1].replace(/,/g, ''));
+                                        if (price > 0) break;
+                                    }
+                                }
+                                
+                                // 如果名稱中沒有價格，嘗試從其他元素獲取
+                                if (price === 0) {
+                                    const priceElement = element.querySelector('.price, .cost, .amount, [class*="price"]');
+                                    if (priceElement) {
+                                        const priceText = priceElement.textContent || '';
+                                        const priceMatch = priceText.match(/([\d,]+)/);
+                                        if (priceMatch) {
+                                            price = parseInt(priceMatch[1].replace(/,/g, ''));
+                                        }
+                                    }
                                 }
                                 
                                 // 圖片提取
@@ -638,15 +702,20 @@ async function fetchYahooAuctionProductsProgressive() {
                                     imageUrl = 'https://via.placeholder.com/150x150?text=無圖片';
                                 }
                                 
-                                const link = `https://tw.bid.yahoo.com${href}`;
+                                const link = href.startsWith('http') ? href : `https://tw.bid.yahoo.com${href}`;
                                 
                                 items.push({ id, name, price, imageUrl, link });
+                                
+                                if (index < 5) {
+                                    console.log(`商品 ${index + 1}: ${name} - $${price}`);
+                                }
                             }
                         } catch (error) {
                             console.error('解析商品時發生錯誤:', error);
                         }
                     });
                     
+                    console.log(`成功解析 ${items.length} 個商品`);
                     return items;
                 });
 
@@ -1747,26 +1816,54 @@ app.get('/api/export', requireAuth, async (req, res) => {
     }
 });
 
-// 停用定時更新以避免Render資源耗盡和重啟循環
-// 改為手動觸發更新模式
-console.log('定時更新已停用，請使用手動更新功能');
-
-// 啟動時只載入測試資料，避免Render重啟循環
-setTimeout(async () => {
-    if (!isUpdating && productsCache.length === 0) {
-        console.log('啟動初始化，載入測試資料...');
+// 設定定時更新 - 每10分鐘檢查一次更新
+setInterval(async () => {
+    if (!isUpdating) {
+        console.log('執行定時檢查更新...');
+        isUpdating = true;
         try {
-            // 只載入測試資料，不執行實際抓取
-            productsCache = generateTestData();
-            lastUpdateTime = new Date();
-            addUpdateLog('info', '系統啟動完成，使用測試資料。請手動觸發更新以獲取實際商品資料。');
-            console.log('系統初始化完成，可接受用戶請求');
+            // 使用快速檢測模式檢查是否有變更
+            const detectionResult = await fullChangeDetection();
+            if (detectionResult.changesDetected) {
+                console.log('檢測到變更，執行部分更新...');
+                await partialUpdateProducts(detectionResult);
+            } else {
+                console.log('未檢測到變更');
+            }
         } catch (error) {
-            console.error('初始化失敗:', error);
-            addUpdateLog('error', `初始化失敗: ${error.message}`);
+            console.error('定時檢查更新失敗:', error);
+            addUpdateLog('error', `定時檢查更新失敗: ${error.message}`);
+        } finally {
+            isUpdating = false;
         }
     }
-}, 5000); // 延遲5秒啟動
+}, 10 * 60 * 1000); // 10分鐘
+
+// 啟動時立即執行完整抓取
+setTimeout(async () => {
+    if (!isUpdating) {
+        console.log('啟動初始化，開始完整抓取商品資料...');
+        isUpdating = true;
+        try {
+            // 先載入測試資料讓系統可用
+            productsCache = generateTestData();
+            lastUpdateTime = new Date();
+            addUpdateLog('info', '系統啟動，載入測試資料，開始完整抓取...');
+            
+            // 立即執行完整抓取
+            await fetchYahooAuctionProducts();
+            
+            addUpdateLog('success', '系統啟動完成，商品資料抓取完畢');
+            console.log('系統初始化完成，商品資料已更新');
+        } catch (error) {
+            console.error('初始化抓取失敗:', error);
+            addUpdateLog('error', `初始化抓取失敗: ${error.message}`);
+            // 保持測試資料
+        } finally {
+            isUpdating = false;
+        }
+    }
+}, 10000); // 延遲10秒啟動，讓系統穩定
 
 // 啟動伺服器（僅在直接執行時啟動）
 if (require.main === module) {
