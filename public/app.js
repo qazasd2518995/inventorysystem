@@ -2,13 +2,121 @@
 let allProducts = [];
 let filteredProducts = [];
 let autoRefreshInterval = null;
+let isAuthenticated = false;
 
 // DOM 載入完成後初始化
 document.addEventListener('DOMContentLoaded', function() {
-    loadProducts();
-    setupEventListeners();
-    setupAutoRefresh();
+    checkAuthStatus();
 });
+
+// 檢查登入狀態
+async function checkAuthStatus() {
+    try {
+        const response = await axios.get('/api/auth-status');
+        if (response.data.success && response.data.authenticated) {
+            isAuthenticated = true;
+            showMainContent();
+            loadProducts();
+            setupEventListeners();
+            setupAutoRefresh();
+        } else {
+            showLoginForm();
+        }
+    } catch (error) {
+        console.error('檢查登入狀態失敗:', error);
+        showLoginForm();
+    }
+}
+
+// 顯示登入表單
+function showLoginForm() {
+    document.getElementById('loginContainer').style.display = 'block';
+    document.getElementById('mainContainer').style.display = 'none';
+    document.getElementById('userInfo').style.display = 'none';
+    document.getElementById('logoutBtn').style.display = 'none';
+}
+
+// 顯示主要內容
+function showMainContent() {
+    document.getElementById('loginContainer').style.display = 'none';
+    document.getElementById('mainContainer').style.display = 'block';
+    document.getElementById('userInfo').style.display = 'inline';
+    document.getElementById('logoutBtn').style.display = 'inline-block';
+    document.getElementById('username').textContent = '2518995';
+}
+
+// 處理登入
+async function handleLogin(event) {
+    event.preventDefault();
+    
+    const username = document.getElementById('loginUsername').value;
+    const password = document.getElementById('loginPassword').value;
+    const loginBtn = document.getElementById('loginBtn');
+    const loginError = document.getElementById('loginError');
+    
+    // 清除之前的錯誤訊息
+    loginError.style.display = 'none';
+    
+    // 顯示載入狀態
+    loginBtn.disabled = true;
+    loginBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> 登入中...';
+    
+    try {
+        const response = await axios.post('/api/login', {
+            username: username,
+            password: password
+        });
+        
+        if (response.data.success) {
+            isAuthenticated = true;
+            showMainContent();
+            loadProducts();
+            setupEventListeners();
+            setupAutoRefresh();
+        }
+    } catch (error) {
+        console.error('登入失敗:', error);
+        
+        let errorMessage = '登入失敗，請稍後再試';
+        if (error.response && error.response.data && error.response.data.error) {
+            errorMessage = error.response.data.error;
+        }
+        
+        loginError.textContent = errorMessage;
+        loginError.style.display = 'block';
+    } finally {
+        // 恢復按鈕狀態
+        loginBtn.disabled = false;
+        loginBtn.innerHTML = '<i class="bi bi-box-arrow-in-right"></i> 登入';
+    }
+}
+
+// 登出
+async function logout() {
+    try {
+        await axios.post('/api/logout');
+        isAuthenticated = false;
+        
+        // 清除定時器
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+        }
+        
+        // 清除資料
+        allProducts = [];
+        filteredProducts = [];
+        
+        // 重置表單
+        document.getElementById('loginForm').reset();
+        
+        // 顯示登入表單
+        showLoginForm();
+        
+    } catch (error) {
+        console.error('登出失敗:', error);
+        alert('登出失敗，請稍後再試');
+    }
+}
 
 // 設定事件監聽器
 function setupEventListeners() {
@@ -74,6 +182,14 @@ async function loadProducts() {
         }
     } catch (error) {
         console.error('載入商品時發生錯誤:', error);
+        
+        // 檢查是否為認證錯誤
+        if (error.response && error.response.status === 401) {
+            isAuthenticated = false;
+            showLoginForm();
+            return;
+        }
+        
         showError('無法連接到伺服器，請稍後再試');
     } finally {
         showLoading(false);
@@ -247,6 +363,14 @@ async function exportExcel() {
         showSuccess('Excel 檔案已成功匯出');
     } catch (error) {
         console.error('匯出 Excel 時發生錯誤:', error);
+        
+        // 檢查是否為認證錯誤
+        if (error.response && error.response.status === 401) {
+            isAuthenticated = false;
+            showLoginForm();
+            return;
+        }
+        
         showError('匯出失敗，請稍後再試');
     } finally {
         exportBtn.disabled = false;

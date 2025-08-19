@@ -8,15 +8,34 @@ const path = require('path');
 const fs = require('fs');
 const puppeteer = require('puppeteer');
 const crypto = require('crypto');
+const session = require('express-session');
+const bcrypt = require('bcryptjs');
 // const sharp = require('sharp'); // 移除sharp依賴以適合Vercel部署
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// 登入系統配置
+const LOGIN_CREDENTIALS = {
+    username: '2518995',
+    password: '2518995'
+};
+
 // 中間件
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
+
+// 會話管理設定
+app.use(session({
+    secret: 'yahoo-auction-secret-2518995',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { 
+        secure: false, // 在生產環境中應設為 true (需要 HTTPS)
+        maxAge: 24 * 60 * 60 * 1000 // 24小時
+    }
+}));
 
 // 儲存商品資料的變數
 let productsCache = [];
@@ -28,6 +47,19 @@ let updateLogs = []; // 更新日誌陣列
 const MAX_LOGS = 100; // 最多保留100條日誌
 
 // 移除圖片下載和壓縮功能以適合Vercel部署
+
+// 驗證登入中間件
+function requireAuth(req, res, next) {
+    if (req.session && req.session.authenticated) {
+        return next();
+    } else {
+        return res.status(401).json({
+            success: false,
+            error: '需要登入才能存取此功能',
+            requireLogin: true
+        });
+    }
+}
 
 // 產生商品雜湊值的函數
 function generateProductHash(product) {
@@ -962,8 +994,104 @@ function generateTestData() {
     ];
 }
 
+// API路由 - 登入
+app.post('/api/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        
+        if (!username || !password) {
+            return res.status(400).json({
+                success: false,
+                error: '請輸入帳號和密碼'
+            });
+        }
+        
+        // 驗證帳號密碼
+        if (username === LOGIN_CREDENTIALS.username && password === LOGIN_CREDENTIALS.password) {
+            req.session.authenticated = true;
+            req.session.username = username;
+            
+            addUpdateLog('info', `用戶 ${username} 登入成功`);
+            
+            res.json({
+                success: true,
+                message: '登入成功',
+                user: {
+                    username: username,
+                    loginTime: new Date().toISOString()
+                }
+            });
+        } else {
+            addUpdateLog('warning', `登入失敗：帳號 ${username} 密碼錯誤`);
+            
+            res.status(401).json({
+                success: false,
+                error: '帳號或密碼錯誤'
+            });
+        }
+    } catch (error) {
+        console.error('登入 API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API路由 - 登出
+app.post('/api/logout', (req, res) => {
+    try {
+        const username = req.session.username;
+        
+        req.session.destroy((err) => {
+            if (err) {
+                console.error('登出錯誤:', err);
+                return res.status(500).json({
+                    success: false,
+                    error: '登出失敗'
+                });
+            }
+            
+            addUpdateLog('info', `用戶 ${username || '未知'} 登出`);
+            
+            res.json({
+                success: true,
+                message: '登出成功'
+            });
+        });
+    } catch (error) {
+        console.error('登出 API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API路由 - 檢查登入狀態
+app.get('/api/auth-status', (req, res) => {
+    try {
+        const isAuthenticated = req.session && req.session.authenticated;
+        
+        res.json({
+            success: true,
+            authenticated: isAuthenticated,
+            user: isAuthenticated ? {
+                username: req.session.username,
+                loginTime: req.session.cookie.expires
+            } : null
+        });
+    } catch (error) {
+        console.error('檢查登入狀態 API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // API路由 - 取得商品列表（智慧更新）
-app.get('/api/products', async (req, res) => {
+app.get('/api/products', requireAuth, async (req, res) => {
     try {
         const forceFullUpdate = req.query.full === 'true'; // 允許強制完整更新
         const now = new Date();
@@ -1027,7 +1155,7 @@ app.get('/api/products', async (req, res) => {
 });
 
 // API路由 - 手動全面檢測更新
-app.get('/api/check-updates', async (req, res) => {
+app.get('/api/check-updates', requireAuth, async (req, res) => {
     try {
         if (isUpdating) {
             return res.json({
@@ -1056,7 +1184,7 @@ app.get('/api/check-updates', async (req, res) => {
 });
 
 // API路由 - 手動觸發部分更新（檢測並更新變更）
-app.get('/api/partial-update', async (req, res) => {
+app.get('/api/partial-update', requireAuth, async (req, res) => {
     try {
         if (isUpdating) {
             return res.json({
@@ -1113,7 +1241,7 @@ app.get('/api/partial-update', async (req, res) => {
 });
 
 // API路由 - 手動觸發完整更新
-app.get('/api/force-update', async (req, res) => {
+app.get('/api/force-update', requireAuth, async (req, res) => {
     try {
         if (isUpdating) {
             return res.json({
@@ -1147,7 +1275,7 @@ app.get('/api/force-update', async (req, res) => {
 });
 
 // API路由 - 獲取更新日誌
-app.get('/api/update-logs', async (req, res) => {
+app.get('/api/update-logs', requireAuth, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
@@ -1191,7 +1319,7 @@ app.get('/api/update-logs', async (req, res) => {
 });
 
 // API路由 - 清除更新日誌
-app.delete('/api/update-logs', async (req, res) => {
+app.delete('/api/update-logs', requireAuth, async (req, res) => {
     try {
         const oldCount = updateLogs.length;
         updateLogs = [];
@@ -1241,7 +1369,7 @@ app.post('/api/refresh', async (req, res) => {
 });
 
 // API路由 - 匯出Excel
-app.get('/api/export', async (req, res) => {
+app.get('/api/export', requireAuth, async (req, res) => {
     try {
         // 確保有最新資料
         if (!isUpdating && productsCache.length === 0) {

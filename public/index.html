@@ -15,15 +15,59 @@
                 <i class="bi bi-shop"></i> 源正山鋼索五金行 - 奇摩拍賣商品管理系統
             </span>
             <div class="d-flex align-items-center text-white">
+                <span id="userInfo" class="me-3" style="display: none;">
+                    <i class="bi bi-person-circle"></i> <span id="username"></span>
+                </span>
                 <span id="lastUpdate" class="me-3">尚未更新</span>
-                <button class="btn btn-light" onclick="refreshProducts()">
+                <button class="btn btn-light me-2" onclick="refreshProducts()">
                     <i class="bi bi-arrow-clockwise"></i> 立即更新
+                </button>
+                <button id="logoutBtn" class="btn btn-outline-light" onclick="logout()" style="display: none;">
+                    <i class="bi bi-box-arrow-right"></i> 登出
                 </button>
             </div>
         </div>
     </nav>
 
-    <div class="container-fluid mt-4">
+    <!-- 登入界面 -->
+    <div id="loginContainer" class="container-fluid mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-4">
+                <div class="card shadow">
+                    <div class="card-body">
+                        <div class="text-center mb-4">
+                            <i class="bi bi-shield-lock" style="font-size: 3rem; color: #0d6efd;"></i>
+                            <h3 class="mt-2">系統登入</h3>
+                            <p class="text-muted">請輸入帳號密碼以存取管理系統</p>
+                        </div>
+                        <form id="loginForm" onsubmit="handleLogin(event)">
+                            <div class="mb-3">
+                                <label for="loginUsername" class="form-label">帳號</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-person"></i></span>
+                                    <input type="text" class="form-control" id="loginUsername" required>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="loginPassword" class="form-label">密碼</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                                    <input type="password" class="form-control" id="loginPassword" required>
+                                </div>
+                            </div>
+                            <div id="loginError" class="alert alert-danger" style="display: none;"></div>
+                            <button type="submit" class="btn btn-primary w-100" id="loginBtn">
+                                <i class="bi bi-box-arrow-in-right"></i> 登入
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主要內容區域 -->
+    <div id="mainContainer" class="container-fluid mt-4" style="display: none;">
         <div class="row mb-3">
             <div class="col-md-6">
                 <div class="card">
