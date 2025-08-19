@@ -170,7 +170,7 @@ async function quickChangeDetection() {
     
     try {
         browser = await puppeteer.launch({
-            headless: true,
+            headless: 'new',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -178,9 +178,13 @@ async function quickChangeDetection() {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--single-process'
             ],
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            timeout: 60000
         });
 
         const page = await browser.newPage();
@@ -196,7 +200,7 @@ async function quickChangeDetection() {
                 ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
                 : `https://tw.bid.yahoo.com/booth/Y1823944291?pg=${currentPage}`;
             
-            await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+            await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 90000 });
             await new Promise(resolve => setTimeout(resolve, 3000));
             
             // 簡化的滾動
@@ -288,7 +292,7 @@ async function fullChangeDetection() {
     
     try {
         browser = await puppeteer.launch({
-            headless: true,
+            headless: 'new',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -296,9 +300,13 @@ async function fullChangeDetection() {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--single-process'
             ],
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            timeout: 60000
         });
 
         const page = await browser.newPage();
@@ -321,7 +329,7 @@ async function fullChangeDetection() {
             try {
                 await page.goto(url, { 
                     waitUntil: 'networkidle2',
-                    timeout: 30000 
+                    timeout: 90000 
                 });
 
                 // 滾動頁面確保所有商品載入
@@ -544,7 +552,7 @@ async function fetchYahooAuctionProducts() {
     try {
         console.log('正在啟動瀏覽器...');
         browser = await puppeteer.launch({
-            headless: true,
+            headless: 'new',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -552,9 +560,13 @@ async function fetchYahooAuctionProducts() {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--single-process'
             ],
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            timeout: 60000
         });
 
         const page = await browser.newPage();
@@ -580,7 +592,7 @@ async function fetchYahooAuctionProducts() {
             // 載入頁面
             await page.goto(pageUrl, { 
                 waitUntil: 'networkidle2', 
-                timeout: 60000 
+                timeout: 90000 
             });
 
             // 等待更長時間確保圖片載入完成
@@ -993,6 +1005,20 @@ function generateTestData() {
         }
     ];
 }
+
+// API路由 - 健康檢查（不需要認證）
+app.get('/api/health', (req, res) => {
+    res.json({
+        success: true,
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        isUpdating,
+        productsCount: productsCache.length,
+        lastUpdate: lastUpdateTime
+    });
+});
 
 // API路由 - 登入
 app.post('/api/login', async (req, res) => {
@@ -1501,13 +1527,38 @@ setInterval(async () => {
     }
 }, 30 * 60 * 1000); // 30分鐘
 
-// 啟動時立即抓取一次資料
-setTimeout(() => {
+// 啟動時立即抓取一次資料（延長等待時間讓系統穩定）
+setTimeout(async () => {
     if (!isUpdating) {
         console.log('啟動初始化抓取...');
-        fetchYahooAuctionProducts().catch(console.error);
+        isUpdating = true;
+        try {
+            // 先嘗試使用測試資料，避免啟動時過度負載
+            productsCache = generateTestData();
+            lastUpdateTime = new Date();
+            addUpdateLog('info', '系統啟動，使用測試資料');
+            
+            // 然後在背景執行實際抓取
+            setTimeout(async () => {
+                if (!isUpdating) {
+                    console.log('背景執行商品抓取...');
+                    try {
+                        await fetchYahooAuctionProducts();
+                    } catch (error) {
+                        console.error('背景抓取失敗:', error);
+                        addUpdateLog('error', `背景抓取失敗: ${error.message}`);
+                    }
+                }
+            }, 30000); // 30秒後執行背景抓取
+            
+        } catch (error) {
+            console.error('初始化失敗:', error);
+            addUpdateLog('error', `初始化失敗: ${error.message}`);
+        } finally {
+            isUpdating = false;
+        }
     }
-}, 5000); // 延遲5秒啟動
+}, 10000); // 延遲10秒啟動
 
 // 啟動伺服器（僅在直接執行時啟動）
 if (require.main === module) {
