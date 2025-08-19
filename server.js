@@ -720,13 +720,18 @@ async function scrapePage(browser, pageNum) {
                     const parentElement = linkElement.closest('div, li, tr, td, article') || linkElement.parentElement;
                     
                     if (parentElement) {
-                        // 嘗試多種圖片選擇器
+                        // 嘗試多種圖片選擇器 - 更全面的搜索
                         const imgSelectors = [
                             'img[src*="yahoo"]',
                             'img[src*="yimg"]', 
                             'img[data-src*="yahoo"]',
                             'img[data-src*="yimg"]',
+                            'img[data-lazy-src*="yahoo"]',
+                            'img[data-lazy-src*="yimg"]',
+                            'img[src*="s.yimg.com"]',
+                            'img[data-src*="s.yimg.com"]',
                             'img[src]:not([src*="loading"]):not([src*="placeholder"]):not([src*="item-no-image"])',
+                            'img[data-src]:not([data-src*="loading"]):not([data-src*="placeholder"])',
                             'img'
                         ];
                         
@@ -735,8 +740,10 @@ async function scrapePage(browser, pageNum) {
                             if (imgElement) {
                                 // 優先使用 data-src（懶載入圖片）
                                 let src = imgElement.getAttribute('data-src') || 
+                                         imgElement.getAttribute('data-lazy-src') ||
                                          imgElement.getAttribute('src') ||
-                                         imgElement.getAttribute('data-original');
+                                         imgElement.getAttribute('data-original') ||
+                                         imgElement.getAttribute('data-img');
                                 
                                 if (src && 
                                     !src.includes('item-no-image.svg') && 
@@ -759,10 +766,48 @@ async function scrapePage(browser, pageNum) {
                         
                         // 如果還是沒找到，嘗試在更大範圍內搜索
                         if (!imageUrl) {
-                            const allImages = parentElement.querySelectorAll('img');
+                            // 擴大搜索範圍到更上層的父元素
+                            const expandedParent = parentElement.closest('div, li, tr, td, article, section') || 
+                                                 parentElement.parentElement?.parentElement || 
+                                                 parentElement;
+                                                 
+                            const allImages = expandedParent.querySelectorAll('img');
                             for (const img of allImages) {
+                                let src = img.getAttribute('data-src') || 
+                                         img.getAttribute('data-lazy-src') ||
+                                         img.getAttribute('src') ||
+                                         img.getAttribute('data-original');
+                                         
+                                if (src && 
+                                    (src.includes('yahoo') || src.includes('yimg') || src.includes('s.yimg.com')) && 
+                                    !src.includes('loading') &&
+                                    !src.includes('placeholder') &&
+                                    !src.includes('item-no-image') &&
+                                    src.length > 20) { // 確保URL足夠長
+                                    
+                                    if (src.startsWith('//')) {
+                                        src = 'https:' + src;
+                                    } else if (src.startsWith('/')) {
+                                        src = 'https://tw.bid.yahoo.com' + src;
+                                    }
+                                    imageUrl = src;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // 最後嘗試：檢查是否有base64圖片或其他格式
+                        if (!imageUrl) {
+                            const anyImages = parentElement.querySelectorAll('img');
+                            for (const img of anyImages) {
                                 let src = img.getAttribute('data-src') || img.getAttribute('src');
-                                if (src && src.includes('yahoo') && !src.includes('loading')) {
+                                if (src && 
+                                    src.length > 30 && 
+                                    !src.includes('loading') && 
+                                    !src.includes('placeholder') &&
+                                    !src.includes('item-no-image') &&
+                                    (src.startsWith('http') || src.startsWith('//') || src.startsWith('data:'))) {
+                                    
                                     if (src.startsWith('//')) {
                                         src = 'https:' + src;
                                     }
@@ -785,8 +830,11 @@ async function scrapePage(browser, pageNum) {
                     });
                     
                     // 調試：記錄前幾個商品的圖片情況
-                    if (items.length <= 3) {
-                        console.log(`商品 ${items.length} 圖片:`, imageUrl ? '有圖片' : '無圖片', imageUrl ? imageUrl.substring(0, 50) + '...' : '');
+                    if (items.length <= 5) {
+                        console.log(`商品 ${items.length} (ID: ${id}):`, 
+                                  imageUrl ? '✅ 有圖片' : '❌ 無圖片', 
+                                  imageUrl ? imageUrl.substring(0, 60) + '...' : '',
+                                  `名稱: ${name.substring(0, 30)}...`);
                     }
                     
                 } catch (error) {
