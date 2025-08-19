@@ -24,6 +24,8 @@ let lastUpdateTime = null;
 let isUpdating = false; // 防止重複更新的旗標
 let lastFullScanTime = null; // 上次完整掃描時間
 let productHashMap = new Map(); // 商品雜湊對照表，用於快速檢測變更
+let updateLogs = []; // 更新日誌陣列
+const MAX_LOGS = 100; // 最多保留100條日誌
 
 // 移除圖片下載和壓縮功能以適合Vercel部署
 
@@ -31,6 +33,102 @@ let productHashMap = new Map(); // 商品雜湊對照表，用於快速檢測變
 function generateProductHash(product) {
     const hashString = `${product.id}-${product.name}-${product.price}-${product.imageUrl}`;
     return crypto.createHash('md5').update(hashString).digest('hex');
+}
+
+// 添加更新日誌的函數
+function addUpdateLog(type, message, details = null) {
+    const logEntry = {
+        id: Date.now() + Math.random(), // 簡單的唯一ID
+        timestamp: new Date().toISOString(),
+        type, // 'info', 'success', 'warning', 'error', 'new', 'modified', 'removed'
+        message,
+        details
+    };
+    
+    updateLogs.unshift(logEntry); // 新日誌在前
+    
+    // 保持日誌數量在限制內
+    if (updateLogs.length > MAX_LOGS) {
+        updateLogs = updateLogs.slice(0, MAX_LOGS);
+    }
+    
+    console.log(`[${type.toUpperCase()}] ${message}`);
+}
+
+// 比較商品差異並記錄變更
+function compareAndLogChanges(oldProducts, newProducts) {
+    const oldProductsMap = new Map(oldProducts.map(p => [p.id, p]));
+    const newProductsMap = new Map(newProducts.map(p => [p.id, p]));
+    
+    let newCount = 0;
+    let modifiedCount = 0;
+    let removedCount = 0;
+    
+    // 檢查新增和修改的商品
+    for (const [id, newProduct] of newProductsMap) {
+        const oldProduct = oldProductsMap.get(id);
+        
+        if (!oldProduct) {
+            // 新商品
+            newCount++;
+            addUpdateLog('new', `新增商品：${newProduct.name}`, {
+                productId: id,
+                name: newProduct.name,
+                price: newProduct.price,
+                link: newProduct.link
+            });
+        } else {
+            // 檢查是否有修改
+            const oldHash = generateProductHash(oldProduct);
+            const newHash = generateProductHash(newProduct);
+            
+            if (oldHash !== newHash) {
+                modifiedCount++;
+                const changes = [];
+                
+                if (oldProduct.name !== newProduct.name) {
+                    changes.push(`名稱: "${oldProduct.name}" → "${newProduct.name}"`);
+                }
+                if (oldProduct.price !== newProduct.price) {
+                    changes.push(`價格: $${oldProduct.price} → $${newProduct.price}`);
+                }
+                if (oldProduct.imageUrl !== newProduct.imageUrl) {
+                    changes.push(`圖片已更新`);
+                }
+                
+                addUpdateLog('modified', `商品已修改：${newProduct.name}`, {
+                    productId: id,
+                    name: newProduct.name,
+                    changes,
+                    link: newProduct.link
+                });
+            }
+        }
+    }
+    
+    // 檢查移除的商品
+    for (const [id, oldProduct] of oldProductsMap) {
+        if (!newProductsMap.has(id)) {
+            removedCount++;
+            addUpdateLog('removed', `商品已下架：${oldProduct.name}`, {
+                productId: id,
+                name: oldProduct.name,
+                price: oldProduct.price,
+                link: oldProduct.link
+            });
+        }
+    }
+    
+    // 總結日誌
+    if (newCount > 0 || modifiedCount > 0 || removedCount > 0) {
+        addUpdateLog('success', `商品更新完成：新增 ${newCount} 個，修改 ${modifiedCount} 個，下架 ${removedCount} 個`, {
+            summary: { newCount, modifiedCount, removedCount, totalProducts: newProducts.length }
+        });
+    } else {
+        addUpdateLog('info', '商品檢查完成，未發現變更');
+    }
+    
+    return { newCount, modifiedCount, removedCount };
 }
 
 // 快速檢測商品變更的函數
@@ -522,6 +620,14 @@ async function fetchYahooAuctionProducts() {
             updateTime: new Date().toISOString()
         }));
 
+        // 比較商品變更並記錄日誌（如果不是第一次抓取）
+        if (productsCache.length > 0) {
+            addUpdateLog('info', '開始比較商品變更...');
+            compareAndLogChanges(productsCache, productsWithTime);
+        } else {
+            addUpdateLog('success', `首次抓取完成：共 ${productsWithTime.length} 個商品`);
+        }
+
         productsCache = productsWithTime;
         lastUpdateTime = new Date();
         lastFullScanTime = new Date();
@@ -632,13 +738,14 @@ app.get('/api/products', async (req, res) => {
             isUpdating = true;
             try {
                 // 先進行快速變更檢測
-                const { changesDetected } = await quickChangeDetection();
+                addUpdateLog('info', '開始快速變更檢測...');
+                const { changesDetected, newProductsCount, modifiedProductsCount } = await quickChangeDetection();
                 
                 if (changesDetected) {
-                    console.log('檢測到商品變更，執行完整更新...');
+                    addUpdateLog('warning', `檢測到商品變更（新增 ${newProductsCount} 個，修改 ${modifiedProductsCount} 個），執行完整更新...`);
                     await fetchYahooAuctionProducts();
                 } else {
-                    console.log('未檢測到商品變更，跳過完整更新');
+                    addUpdateLog('info', '未檢測到商品變更，跳過完整更新');
                     lastUpdateTime = new Date(); // 更新檢查時間
                 }
             } finally {
@@ -651,7 +758,8 @@ app.get('/api/products', async (req, res) => {
             products: productsCache,
             lastUpdate: lastUpdateTime,
             lastFullScan: lastFullScanTime,
-            total: productsCache.length
+            total: productsCache.length,
+            recentLogs: updateLogs.slice(0, 5) // 回傳最新的5條日誌
         });
     } catch (error) {
         console.error('API 錯誤:', error);
@@ -703,7 +811,7 @@ app.get('/api/force-update', async (req, res) => {
         }
 
         isUpdating = true;
-        console.log('手動觸發完整更新...');
+        addUpdateLog('info', '手動觸發完整更新...');
         
         try {
             await fetchYahooAuctionProducts();
@@ -719,6 +827,72 @@ app.get('/api/force-update', async (req, res) => {
     } catch (error) {
         isUpdating = false;
         console.error('強制更新 API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API路由 - 獲取更新日誌
+app.get('/api/update-logs', async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const type = req.query.type; // 可選：篩選特定類型的日誌
+        
+        let filteredLogs = updateLogs;
+        
+        // 按類型篩選
+        if (type) {
+            filteredLogs = updateLogs.filter(log => log.type === type);
+        }
+        
+        // 分頁
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        const paginatedLogs = filteredLogs.slice(startIndex, endIndex);
+        
+        res.json({
+            success: true,
+            logs: paginatedLogs,
+            pagination: {
+                currentPage: page,
+                totalPages: Math.ceil(filteredLogs.length / limit),
+                totalLogs: filteredLogs.length,
+                hasMore: endIndex < filteredLogs.length
+            },
+            summary: {
+                totalLogs: updateLogs.length,
+                lastUpdate: lastUpdateTime,
+                lastFullScan: lastFullScanTime,
+                isUpdating
+            }
+        });
+    } catch (error) {
+        console.error('獲取更新日誌 API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API路由 - 清除更新日誌
+app.delete('/api/update-logs', async (req, res) => {
+    try {
+        const oldCount = updateLogs.length;
+        updateLogs = [];
+        
+        addUpdateLog('info', `手動清除了 ${oldCount} 條更新日誌`);
+        
+        res.json({
+            success: true,
+            message: `已清除 ${oldCount} 條更新日誌`,
+            remainingLogs: updateLogs.length
+        });
+    } catch (error) {
+        console.error('清除更新日誌 API 錯誤:', error);
         res.status(500).json({
             success: false,
             error: error.message
