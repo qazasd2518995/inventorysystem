@@ -572,11 +572,16 @@ async function fetchYahooAuctionProductsFast() {
     let allProducts = [];
     let browser = null;
     const maxPages = 50;
-    const concurrency = 3; // 同時處理3個頁面，平衡速度和穩定性
+    // 根據環境調整併發度
+    const isRenderEnvironment = process.env.RENDER || process.env.NODE_ENV === 'production';
+    const concurrency = isRenderEnvironment ? 2 : 3; // Render環境降低併發度，減少資源競爭
     const updateInterval = 10; // 每10頁更新一次快取（因為並行處理更快）
 
     try {
         console.log('開始並行快速抓取所有商品...');
+        console.log(`環境檢測：${isRenderEnvironment ? 'Render生產環境' : '本地開發環境'}`);
+        console.log(`併發設置：同時處理 ${concurrency} 個頁面`);
+        
         browser = await puppeteer.launch({
             headless: 'new',
             args: [
@@ -590,8 +595,16 @@ async function fetchYahooAuctionProductsFast() {
                 '--disable-web-security',
                 '--disable-features=VizDisplayCompositor',
                 '--memory-pressure-off',
-                // 保留JavaScript，Yahoo拍賣可能需要JS載入商品
-                '--disable-plugins'
+                '--disable-plugins',
+                // Render環境特殊優化
+                ...(isRenderEnvironment ? [
+                    '--max-old-space-size=1024', // 限制記憶體使用
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--disable-ipc-flooding-protection',
+                    '--single-process', // 單進程模式，減少記憶體佔用
+                ] : [])
             ],
             timeout: 60000,
             defaultViewport: { width: 1024, height: 768 }
@@ -640,8 +653,9 @@ async function fetchYahooAuctionProductsFast() {
                     break;
                 }
                 
-                // 批次間短暫等待，避免過度請求
-                await new Promise(resolve => setTimeout(resolve, 500)); // 減少等待時間
+                // 批次間等待，根據環境調整
+                const batchDelay = isRenderEnvironment ? 1500 : 500; // Render環境更長等待
+                await new Promise(resolve => setTimeout(resolve, batchDelay));
                 
             } catch (batchError) {
                 console.error(`批次 ${batch}-${batchEnd} 處理失敗:`, batchError.message);
@@ -747,11 +761,46 @@ async function scrapePage(browser, pageNum) {
             });
         });
 
-        // 更長的等待時間確保圖片載入
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        // 針對Render環境的特殊優化
+        const isRenderEnvironment = process.env.RENDER || process.env.NODE_ENV === 'production';
+        
+        if (isRenderEnvironment) {
+            // Render環境：更長等待時間 + 額外的圖片載入檢查
+            console.log(`第 ${pageNum} 頁：Render環境，使用加強載入模式...`);
+            
+            // 第一次等待：讓基本內容載入
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // 檢查並等待圖片載入
+            await page.evaluate(() => {
+                return new Promise((resolve) => {
+                    // 強制觸發所有懶載入圖片
+                    const images = document.querySelectorAll('img[data-src], img[data-lazy-src], img[loading="lazy"]');
+                    images.forEach(img => {
+                        // 觸發懶載入
+                        img.scrollIntoView({ behavior: 'instant', block: 'center' });
+                        
+                        // 手動設置src如果有data-src
+                        const dataSrc = img.getAttribute('data-src') || img.getAttribute('data-lazy-src');
+                        if (dataSrc && !img.src) {
+                            img.src = dataSrc;
+                        }
+                    });
+                    
+                    // 等待圖片載入完成
+                    setTimeout(resolve, 2000);
+                });
+            });
+            
+            // 第二次等待：確保所有圖片都載入完成
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        } else {
+            // 本地環境：標準等待時間
+            await new Promise(resolve => setTimeout(resolve, 4000));
+        }
 
         // 快速提取商品資料
-        const products = await page.evaluate(() => {
+        const products = await page.evaluate((envFlag) => {
             const items = [];
             const itemLinks = document.querySelectorAll('a[href*="item/"]');
             
@@ -901,7 +950,7 @@ async function scrapePage(browser, pageNum) {
                     
                     // 調試：記錄前幾個商品的圖片情況
                     if (items.length <= 5) {
-                        console.log(`商品 ${items.length} (ID: ${id}):`, 
+                        console.log(`[ENV: ${envFlag ? 'RENDER' : 'LOCAL'}] 商品 ${items.length} (ID: ${id}):`, 
                                   imageUrl ? '✅ 有圖片' : '❌ 無圖片', 
                                   imageUrl ? imageUrl.substring(0, 60) + '...' : '',
                                   `名稱: ${name.substring(0, 30)}...`);
@@ -913,7 +962,7 @@ async function scrapePage(browser, pageNum) {
             });
             
             return items;
-        });
+        }, isRenderEnvironment);
 
         return products;
 
