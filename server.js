@@ -521,6 +521,193 @@ async function fetchYahooAuctionProductsLight(maxPages = 5) {
     }
 }
 
+// 並行快速抓取函數 - 同時處理多個頁面
+async function fetchYahooAuctionProductsFast() {
+    let allProducts = [];
+    let browser = null;
+    const maxPages = 50;
+    const concurrency = 5; // 同時處理5個頁面，加速抓取
+    const updateInterval = 10; // 每10頁更新一次快取（因為並行處理更快）
+
+    try {
+        console.log('開始並行快速抓取所有商品...');
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--memory-pressure-off',
+                '--disable-javascript', // 禁用JS加速（只要HTML結構）
+                '--disable-plugins'
+            ],
+            timeout: 60000,
+            defaultViewport: { width: 1024, height: 768 }
+        });
+
+        // 並行處理頁面
+        for (let batch = 1; batch <= maxPages; batch += concurrency) {
+            const batchPromises = [];
+            const batchEnd = Math.min(batch + concurrency - 1, maxPages);
+            
+            console.log(`開始處理第 ${batch}-${batchEnd} 頁...`);
+            
+            for (let pageNum = batch; pageNum <= batchEnd; pageNum++) {
+                batchPromises.push(scrapePage(browser, pageNum));
+            }
+            
+            try {
+                const batchResults = await Promise.allSettled(batchPromises);
+                
+                batchResults.forEach((result, index) => {
+                    const pageNum = batch + index;
+                    if (result.status === 'fulfilled') {
+                        allProducts = allProducts.concat(result.value);
+                        console.log(`第 ${pageNum} 頁成功：${result.value.length} 個商品`);
+                    } else {
+                        console.error(`第 ${pageNum} 頁失敗:`, result.reason?.message || result.reason);
+                    }
+                });
+                
+                // 定期更新快取
+                if (batch % updateInterval === 1) {
+                    const productsWithTime = allProducts.map(product => ({
+                        ...product,
+                        lastUpdated: new Date().toISOString()
+                    }));
+                    
+                    productsCache = productsWithTime;
+                    lastUpdateTime = new Date();
+                    console.log(`[INFO] 並行更新：已抓取 ${allProducts.length} 個商品（第 ${batch}-${batchEnd} 頁）`);
+                    console.log('已更新快取：', productsCache.length, '個商品');
+                }
+                
+                // 檢查是否還有更多頁面
+                if (batchResults.every(result => result.status === 'fulfilled' && result.value.length === 0)) {
+                    console.log('所有頁面都沒有商品，停止抓取');
+                    break;
+                }
+                
+                // 批次間短暫等待，避免過度請求
+                await new Promise(resolve => setTimeout(resolve, 500)); // 減少等待時間
+                
+            } catch (batchError) {
+                console.error(`批次 ${batch}-${batchEnd} 處理失敗:`, batchError.message);
+            }
+        }
+
+    } catch (error) {
+        console.error('並行抓取失敗:', error);
+        addUpdateLog('error', `並行抓取失敗: ${error.message}`);
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+
+    console.log(`並行抓取完成！總共成功抓取 ${allProducts.length} 個商品`);
+    return allProducts;
+}
+
+// 單頁面抓取函數（用於並行處理）
+async function scrapePage(browser, pageNum) {
+    const page = await browser.newPage();
+    
+    try {
+        // 禁用字體和樣式載入以加速，但保留圖片
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            const resourceType = req.resourceType();
+            if (resourceType === 'font' || resourceType === 'stylesheet') {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
+
+        const pageUrl = pageNum === 1 
+            ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
+            : `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&pg=${pageNum}&mode=list`;
+
+        await page.goto(pageUrl, { 
+            waitUntil: 'domcontentloaded', // 只等待DOM載入，不等所有資源
+            timeout: 20000 // 減少超時時間
+        });
+
+        // 快速提取商品資料
+        const products = await page.evaluate(() => {
+            const items = [];
+            const itemLinks = document.querySelectorAll('a[href*="item/"]');
+            
+            itemLinks.forEach((linkElement) => {
+                try {
+                    const href = linkElement.getAttribute('href');
+                    const match = href.match(/item\/([^?]+)/);
+                    if (!match) return;
+                    
+                    const id = match[1];
+                    let name = linkElement.textContent.trim();
+                    
+                    if (!name) {
+                        name = linkElement.getAttribute('title') || '';
+                    }
+                    
+                    if (!name.trim()) return;
+                    
+                    // 快速價格提取
+                    let price = 0;
+                    const priceMatch = name.match(/\$\s?([\d,]+)|NT\$\s?([\d,]+)|([\d,]+)\s?元/);
+                    if (priceMatch) {
+                        price = parseInt((priceMatch[1] || priceMatch[2] || priceMatch[3] || '0').replace(/,/g, ''));
+                    }
+                    
+                    // 圖片提取
+                    let imageUrl = '';
+                    const parentElement = linkElement.closest('div, li, tr, td') || linkElement.parentElement;
+                    if (parentElement) {
+                        const imgElement = parentElement.querySelector('img');
+                        if (imgElement && imgElement.src && 
+                            !imgElement.src.includes('item-no-image.svg') && 
+                            !imgElement.src.includes('loading')) {
+                            imageUrl = imgElement.src;
+                        }
+                    }
+                    
+                    const productUrl = href.startsWith('http') ? href : `https://tw.bid.yahoo.com${href}`;
+                    
+                    items.push({
+                        id: id,
+                        name: name,
+                        price: price,
+                        imageUrl: imageUrl,
+                        url: productUrl,
+                        scrapedAt: new Date().toISOString()
+                    });
+                    
+                } catch (error) {
+                    // 忽略個別商品錯誤，繼續處理
+                }
+            });
+            
+            return items;
+        });
+
+        return products;
+
+    } catch (error) {
+        console.error(`第 ${pageNum} 頁抓取錯誤:`, error.message);
+        return [];
+    } finally {
+        await page.close();
+    }
+}
+
 // 漸進式抓取函數 - 邊抓取邊更新，適合Render環境
 async function fetchYahooAuctionProductsProgressive() {
     let allProducts = [];
@@ -1129,8 +1316,8 @@ async function fetchYahooAuctionProductsProgressive() {
 
 // 爬蟲函數 - 使用 Puppeteer 抓取奇摩拍賣商品資料（完整版）
 async function fetchYahooAuctionProducts() {
-    // 使用漸進式抓取，適合所有環境
-    return await fetchYahooAuctionProductsProgressive();
+    // 使用快速並行抓取，大幅提升速度
+    return await fetchYahooAuctionProductsFast();
     
     let allProducts = [];
     let browser = null;
