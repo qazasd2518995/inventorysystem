@@ -2343,7 +2343,7 @@ app.get('/api/export', requireAuth, async (req, res) => {
             const linkCell = worksheet.getCell(rowIndex, 5); // 第5欄是連結欄
             linkCell.value = {
                 text: '🔗 點擊查看商品',
-                hyperlink: product.link
+                hyperlink: product.url
             };
             linkCell.font = { 
                 color: { argb: 'FF0066CC' }, 
