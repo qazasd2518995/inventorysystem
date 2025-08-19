@@ -31,7 +31,7 @@ SESSION_SECRET=yahoo-auction-secret-key-2025-render
 ```
 MAX_PAGES=50
 SCRAPE_DELAY=1000
-PAGE_LOAD_WAIT=5000
+PAGE_LOAD_WAIT=
 ```
 
 ## 📝 設定步驟
