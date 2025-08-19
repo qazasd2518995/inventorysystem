@@ -604,13 +604,20 @@ function searchProducts(searchTerm) {
             // 搜尋商品名稱
             const nameMatch = product.name.toLowerCase().includes(term);
             
-            // 搜尋價格（支援多種格式）
-            const priceText = product.price.toString();
-            const priceWithComma = product.price.toLocaleString();
-            const priceMatch = priceText.includes(term) || 
+            // 搜尋價格（支援多種格式，自動處理逗號）
+            const priceValue = product.price;
+            const priceText = priceValue.toString(); // 純數字，如：4200
+            const priceWithComma = priceValue.toLocaleString(); // 帶逗號，如：4,200
+            const cleanTerm = term.replace(/,/g, ''); // 移除搜索詞中的逗號
+            
+            // 檢查各種匹配情況：
+            // 1. 直接數字匹配：輸入4200 找到 4200
+            // 2. 帶逗號匹配：輸入4,200 找到 4,200  
+            // 3. 交叉匹配：輸入4200 找到 4,200 或 輸入4,200 找到 4200
+            const priceMatch = priceText.includes(cleanTerm) || 
                               priceWithComma.includes(term) ||
-                              priceText.includes(term.replace(/,/g, '')) ||
-                              term.includes(priceText);
+                              priceText === cleanTerm ||
+                              priceWithComma.replace(/,/g, '') === cleanTerm;
             
             // 搜尋價格範圍（例如：輸入 "1000-5000" 或 ">2000" 或 "<1000"）
             let rangeMatch = false;
