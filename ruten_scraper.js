@@ -1,4 +1,4 @@
-// 露天市集爬蟲邏輯
+// 露天市集爬蟲邏輯 - 修復版
 const puppeteer = require('puppeteer');
 const { 
     initializeDatabase, 
@@ -68,7 +68,7 @@ async function fetchRutenProducts(storeUrl = 'https://www.ruten.com.tw/store/u-m
                 });
 
                 // 等待頁面載入
-                await page.waitForTimeout(parseInt(process.env.PAGE_LOAD_WAIT) || 3000);
+                await new Promise(resolve => setTimeout(resolve, parseInt(process.env.PAGE_LOAD_WAIT) || 3000));
 
                 // 滾動頁面觸發懶加載
                 await page.evaluate(() => {
@@ -95,87 +95,95 @@ async function fetchRutenProducts(storeUrl = 'https://www.ruten.com.tw/store/u-m
                     const productList = [];
                     
                     try {
-                        // 露天市集商品選擇器（需要根據實際網頁結構調整）
-                        const productElements = document.querySelectorAll('.rt-list-item, .item, .product-item, [data-item-id]');
+                        // 露天市集商品連結選擇器（根據調試結果）
+                        const productLinks = document.querySelectorAll('a[href*="/item/"]');
                         
-                        console.log(`找到 ${productElements.length} 個商品元素`);
+                        console.log(`找到 ${productLinks.length} 個商品連結`);
 
-                        productElements.forEach((element, index) => {
+                        productLinks.forEach((linkElement, index) => {
                             try {
-                                // 商品ID - 多種可能的選擇器
+                                // 商品ID - 從URL提取
                                 let productId = '';
-                                const idElement = element.querySelector('[data-item-id]') || 
-                                                element.querySelector('[data-id]') ||
-                                                element.querySelector('a[href*="/item/"]');
-                                
-                                if (idElement) {
-                                    if (idElement.dataset.itemId) {
-                                        productId = idElement.dataset.itemId;
-                                    } else if (idElement.dataset.id) {
-                                        productId = idElement.dataset.id;
-                                    } else if (idElement.href) {
-                                        const match = idElement.href.match(/item\/([^/?]+)/);
-                                        if (match) productId = match[1];
+                                const href = linkElement.href;
+                                if (href) {
+                                    // 露天市集URL格式: https://www.ruten.com.tw/item/show?21628103440809
+                                    const match = href.match(/[?&](\d+)/);
+                                    if (match) {
+                                        productId = match[1];
                                     }
                                 }
 
-                                // 商品名稱
+                                // 商品名稱 - 從連結的文字內容或父元素獲取
                                 let productName = '';
-                                const nameElement = element.querySelector('.rt-item-title, .item-title, .product-title, h3, h4, .title') ||
-                                                  element.querySelector('a[title]');
-                                
-                                if (nameElement) {
-                                    productName = nameElement.textContent?.trim() || nameElement.title?.trim() || '';
-                                }
-
-                                // 商品價格
-                                let price = 0;
-                                const priceElement = element.querySelector('.rt-item-price, .item-price, .product-price, .price');
-                                if (priceElement) {
-                                    const priceText = priceElement.textContent || '';
-                                    const priceMatch = priceText.match(/[\d,]+/);
-                                    if (priceMatch) {
-                                        price = parseInt(priceMatch[0].replace(/,/g, ''));
+                                if (linkElement.textContent && linkElement.textContent.trim()) {
+                                    productName = linkElement.textContent.trim();
+                                } else if (linkElement.title) {
+                                    productName = linkElement.title.trim();
+                                } else {
+                                    // 嘗試從父元素或相鄰元素獲取名稱
+                                    const parentElement = linkElement.closest('[class*="item"], [class*="product"]');
+                                    if (parentElement) {
+                                        const nameElements = parentElement.querySelectorAll('h1, h2, h3, h4, h5, .title, [class*="title"], [class*="name"]');
+                                        for (const nameEl of nameElements) {
+                                            if (nameEl.textContent && nameEl.textContent.trim()) {
+                                                productName = nameEl.textContent.trim();
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
 
-                                // 商品圖片
+                                // 商品價格 - 從父元素或相鄰元素獲取
+                                let price = 0;
+                                const parentElement = linkElement.closest('[class*="item"], [class*="product"]') || linkElement.parentElement;
+                                if (parentElement) {
+                                    const priceElements = parentElement.querySelectorAll('[class*="price"], .money, [class*="cost"], [class*="amount"]');
+                                    for (const priceEl of priceElements) {
+                                        const priceText = priceEl.textContent || '';
+                                        const priceMatch = priceText.match(/[\d,]+/);
+                                        if (priceMatch) {
+                                            price = parseInt(priceMatch[0].replace(/,/g, ''));
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // 商品圖片 - 從父元素獲取
                                 let imageUrl = '';
-                                const imgElement = element.querySelector('img');
-                                if (imgElement) {
-                                    imageUrl = imgElement.src || imgElement.dataset.src || imgElement.dataset.original || '';
-                                    // 處理相對路徑
-                                    if (imageUrl && imageUrl.startsWith('/')) {
-                                        imageUrl = 'https://www.ruten.com.tw' + imageUrl;
+                                if (parentElement) {
+                                    const imgElement = parentElement.querySelector('img');
+                                    if (imgElement) {
+                                        imageUrl = imgElement.src || imgElement.dataset.src || imgElement.dataset.original || '';
+                                        // 處理相對路徑
+                                        if (imageUrl && imageUrl.startsWith('/')) {
+                                            imageUrl = 'https://www.ruten.com.tw' + imageUrl;
+                                        }
                                     }
                                 }
 
                                 // 商品連結
-                                let productUrl = '';
-                                const linkElement = element.querySelector('a[href*="/item/"]') || 
-                                                  element.querySelector('a[href]');
-                                if (linkElement) {
-                                    productUrl = linkElement.href;
-                                    // 處理相對路徑
-                                    if (productUrl && productUrl.startsWith('/')) {
-                                        productUrl = 'https://www.ruten.com.tw' + productUrl;
+                                let productUrl = href;
+                                if (productUrl && productUrl.startsWith('/')) {
+                                    productUrl = 'https://www.ruten.com.tw' + productUrl;
+                                }
+
+                                // 驗證必要資料並過濾重複
+                                if (productId && productUrl && productName && productName.length > 5) {
+                                    // 檢查是否已存在（避免重複）
+                                    const exists = productList.find(p => p.id === productId);
+                                    if (!exists) {
+                                        productList.push({
+                                            id: productId,
+                                            name: productName,
+                                            price: price,
+                                            imageUrl: imageUrl,
+                                            url: productUrl
+                                        });
                                     }
                                 }
 
-                                // 驗證必要資料
-                                if (productId && productName && productUrl) {
-                                    productList.push({
-                                        id: productId,
-                                        name: productName,
-                                        price: price,
-                                        imageUrl: imageUrl,
-                                        url: productUrl,
-                                        scrapedAt: new Date()
-                                    });
-                                }
-
                             } catch (error) {
-                                console.error(`處理第${index}個商品時發生錯誤:`, error);
+                                console.error(`處理第${index}個商品連結時發生錯誤:`, error);
                             }
                         });
 
@@ -217,7 +225,7 @@ async function fetchRutenProducts(storeUrl = 'https://www.ruten.com.tw/store/u-m
                     console.log(`📄 第 ${currentPage} 頁為最後一頁，停止抓取`);
                 } else {
                     currentPage++;
-                    await page.waitForTimeout(parseInt(process.env.SCRAPE_DELAY) || 1000);
+                    await new Promise(resolve => setTimeout(resolve, parseInt(process.env.SCRAPE_DELAY) || 1000));
                 }
 
             } catch (pageError) {

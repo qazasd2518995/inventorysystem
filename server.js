@@ -2194,127 +2194,220 @@ app.post('/api/refresh', async (req, res) => {
 });
 
 // API路由 - 匯出Excel（從資料庫讀取）
+// 新的整合Excel匯出函數
 app.get('/api/export', requireAuth, async (req, res) => {
     try {
-        const storeType = req.query.store || 'yuanzhengshan'; // 預設為源正山
-        console.log(`📊 從資料庫讀取${storeType}商品進行Excel匯出...`);
+        console.log('📊 整合匯出：同時從資料庫讀取兩個賣場商品...');
         
-        // 根據賣場類型獲取商品
-        const products = await getActiveProducts(storeType);
-        const stats = await getProductStats(storeType);
+        // 同時獲取兩個賣場的商品資料
+        const yuanzhengProducts = await getActiveProducts('yuanzhengshan');
+        const youmaoProducts = await getActiveProducts('youmao');
+        const yuanzhengStats = await getProductStats('yuanzhengshan');
+        const youmaoStats = await getProductStats('youmao');
         
-        console.log(`✅ 從資料庫讀取到 ${products.length} 個商品用於Excel匯出`);
+        console.log(`✅ 源正山: ${yuanzhengProducts.length} 個商品`);
+        console.log(`✅ 友茂: ${youmaoProducts.length} 個商品`);
         
-        // 如果資料庫沒有資料，提示用戶
-        if (products.length === 0) {
+        // 如果兩個賣場都沒有資料
+        if (yuanzhengProducts.length === 0 && youmaoProducts.length === 0) {
             return res.status(400).json({
                 success: false,
-                error: '資料庫中沒有商品資料，請先執行商品抓取'
+                error: '兩個賣場都沒有商品資料，請先執行商品抓取'
             });
         }
-
+        
         // 建立新的工作簿
         const workbook = new ExcelJS.Workbook();
-        const storeNames = {
-            'yuanzhengshan': '源正山',
-            'youmao': '友茂'
+        workbook.creator = '商品管理系統';
+        workbook.lastModifiedBy = '自動匯出';
+        workbook.created = new Date();
+        workbook.modified = new Date();
+        
+        // 創建工作表的通用函數
+        const createWorksheet = (workbook, storeName) => {
+            const worksheet = workbook.addWorksheet(storeName);
+            
+            // 設定欄位
+            worksheet.columns = [
+                { header: '商品編號', key: 'id', width: 15 },
+                { header: '商品名稱', key: 'name', width: 40 },
+                { header: '價格', key: 'price', width: 12 },
+                { header: '圖片連結', key: 'image', width: 20 },
+                { header: '商品連結', key: 'link', width: 20 },
+                { header: '更新時間', key: 'updateTime', width: 18 }
+            ];
+
+            // 設定標題列樣式
+            worksheet.getRow(1).font = { bold: true };
+            worksheet.getRow(1).fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFE0E0E0' }
+            };
+            worksheet.getRow(1).height = 30;
+            
+            return worksheet;
         };
-        const worksheet = workbook.addWorksheet(storeNames[storeType] || '商品列表');
+        
+        // 填充商品資料的通用函數
+        const fillWorksheetData = (worksheet, products) => {
+            console.log(`開始處理 ${products.length} 個商品的Excel匯出...`);
+            
+            products.forEach((product, index) => {
+                const rowIndex = index + 2; // 從第2列開始（第1列是標題）
+                
+                // 加入基本資料
+                worksheet.addRow({
+                    id: product.id,
+                    name: product.name,
+                    price: `NT$ ${product.price.toLocaleString()}`,
+                    image: '點擊查看圖片',
+                    link: '點擊查看商品',
+                    updateTime: new Date(product.updatedAt || new Date()).toLocaleString('zh-TW')
+                });
+                
+                // 為圖片網址建立超連結
+                const imageCell = worksheet.getCell(rowIndex, 4);
+                if (product.imageUrl && !product.imageUrl.includes('item-no-image.svg')) {
+                    imageCell.value = {
+                        text: '🖼️ 點擊查看圖片',
+                        hyperlink: product.imageUrl
+                    };
+                    imageCell.font = { 
+                        color: { argb: 'FF009900' }, 
+                        underline: true 
+                    };
+                } else {
+                    imageCell.value = '❌ 無圖片';
+                    imageCell.font = { color: { argb: 'FF999999' } };
+                }
+                
+                // 為商品連結建立超連結
+                const linkCell = worksheet.getCell(rowIndex, 5);
+                if (product.url) {
+                    linkCell.value = {
+                        text: '🔗 點擊查看商品',
+                        hyperlink: product.url
+                    };
+                    linkCell.font = { 
+                        color: { argb: 'FF0066CC' }, 
+                        underline: true 
+                    };
+                } else {
+                    linkCell.value = '❌ 無連結';
+                    linkCell.font = { color: { argb: 'FF999999' } };
+                }
+                
+                worksheet.getRow(rowIndex).height = 20;
+            });
+            
+            // 自動調整欄寬
+            [1, 2, 6].forEach(colIndex => {
+                const column = worksheet.getColumn(colIndex);
+                let maxLength = 0;
+                column.eachCell({ includeEmpty: true }, (cell) => {
+                    const cellValue = cell.value ? cell.value.toString() : '';
+                    if (cellValue.length > maxLength) {
+                        maxLength = cellValue.length;
+                    }
+                });
+                column.width = Math.min(Math.max(maxLength + 2, 10), 50);
+            });
+        };
 
-        // 設定欄位
-        worksheet.columns = [
-            { header: '商品編號', key: 'id', width: 15 },
-            { header: '商品名稱', key: 'name', width: 40 },
-            { header: '價格', key: 'price', width: 12 },
-            { header: '圖片連結', key: 'image', width: 20 },
-            { header: '商品連結', key: 'link', width: 20 },
-            { header: '更新時間', key: 'updateTime', width: 18 }
+        // 創建並填充源正山工作表
+        if (yuanzhengProducts.length > 0) {
+            const yuanzhengWorksheet = createWorksheet(workbook, '源正山鋼索五金行');
+            fillWorksheetData(yuanzhengWorksheet, yuanzhengProducts);
+            console.log(`✅ 源正山工作表完成: ${yuanzhengProducts.length} 個商品`);
+        }
+
+        // 創建並填充友茂工作表
+        if (youmaoProducts.length > 0) {
+            const youmaoWorksheet = createWorksheet(workbook, '友茂');
+            fillWorksheetData(youmaoWorksheet, youmaoProducts);
+            console.log(`✅ 友茂工作表完成: ${youmaoProducts.length} 個商品`);
+        }
+
+        // 創建統計摘要工作表
+        const summaryWorksheet = workbook.addWorksheet('統計摘要');
+        summaryWorksheet.columns = [
+            { header: '賣場', key: 'store', width: 25 },
+            { header: '商品總數', key: 'total', width: 15 },
+            { header: '有圖片', key: 'withImages', width: 15 },
+            { header: '無圖片', key: 'withoutImages', width: 15 },
+            { header: '圖片成功率', key: 'successRate', width: 15 },
+            { header: '最後更新', key: 'lastUpdate', width: 25 }
         ];
-
-        // 設定標題列樣式
-        worksheet.getRow(1).font = { bold: true };
-        worksheet.getRow(1).fill = {
+        
+        // 設定統計摘要標題樣式
+        summaryWorksheet.getRow(1).font = { bold: true };
+        summaryWorksheet.getRow(1).fill = {
             type: 'pattern',
             pattern: 'solid',
-            fgColor: { argb: 'FFE0E0E0' }
+            fgColor: { argb: 'FFCCCCFF' }
+        };
+        
+        // 添加統計資料
+        if (yuanzhengProducts.length > 0) {
+            summaryWorksheet.addRow({
+                store: '源正山鋼索五金行 (Yahoo拍賣)',
+                total: yuanzhengStats.total,
+                withImages: yuanzhengStats.withImages,
+                withoutImages: yuanzhengStats.withoutImages,
+                successRate: yuanzhengStats.imageSuccessRate,
+                lastUpdate: yuanzhengStats.lastUpdate ? new Date(yuanzhengStats.lastUpdate).toLocaleString('zh-TW') : '-'
+            });
+        }
+        
+        if (youmaoProducts.length > 0) {
+            summaryWorksheet.addRow({
+                store: '友茂 (露天市集)',
+                total: youmaoStats.total,
+                withImages: youmaoStats.withImages,
+                withoutImages: youmaoStats.withoutImages,
+                successRate: youmaoStats.imageSuccessRate,
+                lastUpdate: youmaoStats.lastUpdate ? new Date(youmaoStats.lastUpdate).toLocaleString('zh-TW') : '-'
+            });
+        }
+        
+        // 添加總計行
+        const totalProducts = yuanzhengProducts.length + youmaoProducts.length;
+        const totalWithImages = yuanzhengStats.withImages + youmaoStats.withImages;
+        const totalWithoutImages = yuanzhengStats.withoutImages + youmaoStats.withoutImages;
+        const overallSuccessRate = totalProducts > 0 ? ((totalWithImages / totalProducts) * 100).toFixed(1) + '%' : '0%';
+        
+        summaryWorksheet.addRow({
+            store: '總計',
+            total: totalProducts,
+            withImages: totalWithImages,
+            withoutImages: totalWithoutImages,
+            successRate: overallSuccessRate,
+            lastUpdate: new Date().toLocaleString('zh-TW')
+        });
+        
+        // 設定總計行樣式
+        const totalRowIndex = summaryWorksheet.lastRow.number;
+        summaryWorksheet.getRow(totalRowIndex).font = { bold: true };
+        summaryWorksheet.getRow(totalRowIndex).fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFFFCC00' }
         };
 
-        // 設定列高以容納圖片
-        worksheet.getRow(1).height = 30; // 標題列
-        
-        console.log(`開始處理 ${products.length} 個商品的Excel匯出...`);
-        
-        // 加入所有商品資料（從資料庫）
-        products.forEach((product, index) => {
-            const rowIndex = index + 2; // 從第2列開始（第1列是標題）
-            
-            // 加入基本資料
-            worksheet.addRow({
-                id: product.id,
-                name: product.name,
-                price: `NT$ ${product.price.toLocaleString()}`,
-                image: '點擊查看圖片', // 圖片欄位顯示文字，但會是超連結
-                link: '點擊查看商品', // 商品連結
-                updateTime: new Date(product.updatedAt || new Date()).toLocaleString('zh-TW')
-            });
-            
-            // 為圖片網址建立超連結
-            const imageCell = worksheet.getCell(rowIndex, 4); // 第4欄是圖片欄
-            if (product.imageUrl && !product.imageUrl.includes('item-no-image.svg')) {
-                imageCell.value = {
-                    text: '🖼️ 點擊查看圖片',
-                    hyperlink: product.imageUrl
-                };
-                imageCell.font = { 
-                    color: { argb: 'FF009900' }, 
-                    underline: true 
-                };
-            } else {
-                imageCell.value = '📷 無圖片';
-                imageCell.font = { 
-                    color: { argb: 'FF999999' }
-                };
-            }
-            imageCell.alignment = { vertical: 'middle', horizontal: 'center' };
-            
-            // 為商品連結建立超連結
-            const linkCell = worksheet.getCell(rowIndex, 5); // 第5欄是連結欄
-            linkCell.value = {
-                text: '🔗 點擊查看商品',
-                hyperlink: product.url
-            };
-            linkCell.font = { 
-                color: { argb: 'FF0066CC' }, 
-                underline: true 
-            };
-            linkCell.alignment = { vertical: 'middle', horizontal: 'center' };
-        });
-        
-        console.log(`Excel資料處理完成！處理了 ${products.length} 個商品`);
-
-        // 設定邊框
-        worksheet.eachRow((row, rowNumber) => {
-            row.eachCell((cell) => {
-                cell.border = {
-                    top: { style: 'thin' },
-                    left: { style: 'thin' },
-                    bottom: { style: 'thin' },
-                    right: { style: 'thin' }
-                };
-            });
-        });
-
-        // 設定回應標頭
-        const fileName = `商品列表_${new Date().toISOString().split('T')[0]}.xlsx`;
+        // 設定響應頭
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+        res.setHeader('Content-Disposition', `attachment; filename="整合商品清單_${timestamp}.xlsx"`);
 
-        // 輸出Excel檔案
+        // 將工作簿寫入響應
         await workbook.xlsx.write(res);
         res.end();
+        
+        console.log(`✅ 整合Excel匯出完成: 源正山${yuanzhengProducts.length}個 + 友茂${youmaoProducts.length}個 = 總計${totalProducts}個商品`);
 
     } catch (error) {
-        console.error('匯出Excel時發生錯誤:', error);
+        console.error('Excel匯出失敗:', error);
         res.status(500).json({
             success: false,
             error: error.message

@@ -21,21 +21,80 @@ async function initializeDatabase() {
     try {
         console.log('🗄️ 正在初始化資料庫表結構...');
         
-        // 創建商品表
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS products (
-                id VARCHAR(20) NOT NULL,
-                store_type VARCHAR(20) NOT NULL DEFAULT 'yuanzhengshan',
-                name TEXT NOT NULL,
-                price INTEGER DEFAULT 0,
-                image_url TEXT,
-                product_url TEXT,
-                scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_active BOOLEAN DEFAULT TRUE,
-                PRIMARY KEY (id, store_type)
-            )
+        // 檢查是否需要升級現有表格
+        const checkColumnResult = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'products' AND column_name = 'store_type'
         `);
+        
+        if (checkColumnResult.rows.length === 0) {
+            console.log('🔄 檢測到舊版本表格，執行升級...');
+            
+            // 如果表格存在但沒有store_type欄位，需要升級
+            const tableExistsResult = await client.query(`
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'products'
+                )
+            `);
+            
+            if (tableExistsResult.rows[0].exists) {
+                // 表格存在，需要升級
+                console.log('📊 備份現有商品資料...');
+                
+                // 添加store_type欄位
+                await client.query(`
+                    ALTER TABLE products 
+                    ADD COLUMN store_type VARCHAR(20) DEFAULT 'yuanzhengshan'
+                `);
+                
+                // 更新現有記錄的store_type
+                await client.query(`
+                    UPDATE products 
+                    SET store_type = 'yuanzhengshan' 
+                    WHERE store_type IS NULL
+                `);
+                
+                // 設定store_type為NOT NULL
+                await client.query(`
+                    ALTER TABLE products 
+                    ALTER COLUMN store_type SET NOT NULL
+                `);
+                
+                // 刪除舊的主鍵約束
+                await client.query(`
+                    ALTER TABLE products 
+                    DROP CONSTRAINT IF EXISTS products_pkey
+                `);
+                
+                // 添加新的複合主鍵
+                await client.query(`
+                    ALTER TABLE products 
+                    ADD CONSTRAINT products_pkey PRIMARY KEY (id, store_type)
+                `);
+                
+                console.log('✅ 表格升級完成');
+            } else {
+                // 表格不存在，創建新表格
+                await client.query(`
+                    CREATE TABLE products (
+                        id VARCHAR(20) NOT NULL,
+                        store_type VARCHAR(20) NOT NULL DEFAULT 'yuanzhengshan',
+                        name TEXT NOT NULL,
+                        price INTEGER DEFAULT 0,
+                        image_url TEXT,
+                        product_url TEXT,
+                        scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        PRIMARY KEY (id, store_type)
+                    )
+                `);
+            }
+        } else {
+            console.log('✅ 表格結構已是最新版本');
+        }
         
         // 創建更新日誌表
         await client.query(`
@@ -90,7 +149,7 @@ async function upsertProduct(product, storeType = 'yuanzhengshan') {
             product.price || 0,
             product.imageUrl || null,
             product.url || null,
-            new Date(product.scrapedAt || Date.now()),
+            product.scrapedAt ? new Date(product.scrapedAt) : new Date(),
             new Date()
         ]);
         
@@ -135,7 +194,7 @@ async function upsertProducts(products, storeType = 'yuanzhengshan') {
                     product.price || 0,
                     product.imageUrl || null,
                     product.url || null,
-                    new Date(product.scrapedAt || Date.now()),
+                    product.scrapedAt ? new Date(product.scrapedAt) : new Date(),
                     new Date()
                 ]);
                 
