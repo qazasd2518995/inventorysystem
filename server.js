@@ -544,13 +544,198 @@ async function partialUpdateProducts(detectionResult) {
     return productsWithTime;
 }
 
-// 爬蟲函數 - 使用 Puppeteer 抓取奇摩拍賣商品資料
-async function fetchYahooAuctionProducts() {
+// 輕量抓取函數 - 專為Render環境優化，限制頁面數量
+async function fetchYahooAuctionProductsLight(maxPages = 5) {
     let allProducts = [];
     let browser = null;
 
     try {
-        console.log('正在啟動瀏覽器...');
+        console.log(`正在啟動瀏覽器（輕量模式，最多 ${maxPages} 頁）...`);
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--single-process',
+                '--memory-pressure-off'
+            ],
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            timeout: 60000
+        });
+
+        const page = await browser.newPage();
+        
+        // 設定更嚴格的資源限制
+        await page.setViewport({ width: 1024, height: 768 });
+        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // 阻擋圖片和字體以節省資源
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            const resourceType = req.resourceType();
+            if (resourceType === 'image' || resourceType === 'font' || resourceType === 'stylesheet') {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
+
+        let currentPage = 1;
+
+        while (currentPage <= maxPages) {
+            console.log(`正在載入第 ${currentPage} 頁（輕量模式）...`);
+            
+            const pageUrl = currentPage === 1 
+                ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
+                : `https://tw.bid.yahoo.com/booth/Y1823944291?pg=${currentPage}`;
+            
+            // 載入頁面（縮短超時時間）
+            await page.goto(pageUrl, { 
+                waitUntil: 'domcontentloaded', // 改為更快的等待條件
+                timeout: 30000 
+            });
+
+            // 縮短等待時間
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            console.log(`正在抓取第 ${currentPage} 頁商品資料（輕量模式）...`);
+
+            // 提取商品資料（簡化版）
+            const products = await page.evaluate(() => {
+                const items = [];
+                const productElements = document.querySelectorAll('.item');
+                
+                // 限制每頁最多處理50個商品
+                const maxItems = Math.min(productElements.length, 50);
+                
+                for (let i = 0; i < maxItems; i++) {
+                    const element = productElements[i];
+                    try {
+                        const linkElement = element.querySelector('a[href*="item/"]');
+                        if (!linkElement) continue;
+                        
+                        const href = linkElement.getAttribute('href');
+                        const match = href.match(/item\/([^?]+)/);
+                        if (!match) continue;
+                        
+                        const id = match[1];
+                        const nameElement = element.querySelector('.name a, .title a, [title]');
+                        const name = nameElement ? (nameElement.textContent || nameElement.getAttribute('title') || '').trim() : '';
+                        
+                        if (name && id) {
+                            // 簡化的價格提取
+                            const priceText = name;
+                            let price = 0;
+                            const priceMatch = priceText.match(/\$?([\d,]+)/);
+                            if (priceMatch) {
+                                price = parseInt(priceMatch[1].replace(/,/g, ''));
+                            }
+                            
+                            const link = `https://tw.bid.yahoo.com${href}`;
+                            
+                            items.push({ 
+                                id, 
+                                name, 
+                                price, 
+                                imageUrl: 'https://via.placeholder.com/150x150?text=圖片', // 使用佔位圖片
+                                link 
+                            });
+                        }
+                    } catch (error) {
+                        console.error('解析商品時發生錯誤:', error);
+                    }
+                }
+                
+                return items;
+            });
+
+            console.log(`第 ${currentPage} 頁找到 ${products.length} 個商品`);
+            allProducts = allProducts.concat(products);
+
+            // 檢查是否繼續（簡化檢查）
+            if (products.length < 30) {
+                console.log(`第 ${currentPage} 頁商品數量少於30個，停止抓取`);
+                break;
+            }
+
+            currentPage++;
+            
+            // 避免請求過快
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        console.log(`輕量模式總共抓取 ${allProducts.length} 個商品，共 ${currentPage - 1} 頁`);
+        
+        // 為每個商品添加更新時間
+        const productsWithTime = allProducts.map(product => ({
+            ...product,
+            updateTime: new Date().toISOString()
+        }));
+
+        // 比較商品變更並記錄日誌（如果不是第一次抓取）
+        if (productsCache.length > 0) {
+            addUpdateLog('info', '開始比較商品變更（輕量模式）...');
+            compareAndLogChanges(productsCache, productsWithTime);
+        } else {
+            addUpdateLog('success', `輕量模式抓取完成：共 ${productsWithTime.length} 個商品`);
+        }
+
+        productsCache = productsWithTime;
+        lastUpdateTime = new Date();
+        lastFullScanTime = new Date();
+        
+        // 更新商品雜湊對照表
+        productHashMap.clear();
+        productsWithTime.forEach(product => {
+            const hash = generateProductHash(product);
+            productHashMap.set(product.id, hash);
+        });
+        
+        console.log(`已更新商品雜湊對照表，共 ${productHashMap.size} 個商品`);
+        
+        return productsWithTime;
+
+    } catch (error) {
+        console.error('輕量模式抓取商品資料時發生錯誤:', error.message);
+        addUpdateLog('error', `輕量模式抓取失敗: ${error.message}`);
+        
+        // 如果抓取失敗，保持現有資料
+        if (productsCache.length === 0) {
+            console.log('抓取失敗且無現有資料，使用測試資料');
+            productsCache = generateTestData();
+            lastUpdateTime = new Date();
+        } else {
+            console.log('抓取失敗但保持現有資料');
+        }
+        
+        return productsCache;
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+}
+
+// 爬蟲函數 - 使用 Puppeteer 抓取奇摩拍賣商品資料（完整版）
+async function fetchYahooAuctionProducts() {
+    // 在Render環境中使用輕量模式
+    if (process.env.RENDER) {
+        console.log('檢測到Render環境，使用輕量模式');
+        return await fetchYahooAuctionProductsLight(10); // 最多10頁
+    }
+    
+    let allProducts = [];
+    let browser = null;
+
+    try {
+        console.log('正在啟動瀏覽器（完整模式）...');
         browser = await puppeteer.launch({
             headless: 'new',
             args: [
@@ -1512,53 +1697,26 @@ app.get('/api/export', requireAuth, async (req, res) => {
     }
 });
 
-// 設定定時更新 - 每30分鐘自動更新一次（適合Render持續運行）
-setInterval(async () => {
-    if (!isUpdating) {
-        console.log('執行定時更新...');
-        isUpdating = true;
-        try {
-            await fetchYahooAuctionProducts();
-        } catch (error) {
-            console.error('定時更新失敗:', error);
-        } finally {
-            isUpdating = false;
-        }
-    }
-}, 30 * 60 * 1000); // 30分鐘
+// 停用定時更新以避免Render資源耗盡和重啟循環
+// 改為手動觸發更新模式
+console.log('定時更新已停用，請使用手動更新功能');
 
-// 啟動時立即抓取一次資料（延長等待時間讓系統穩定）
+// 啟動時只載入測試資料，避免Render重啟循環
 setTimeout(async () => {
-    if (!isUpdating) {
-        console.log('啟動初始化抓取...');
-        isUpdating = true;
+    if (!isUpdating && productsCache.length === 0) {
+        console.log('啟動初始化，載入測試資料...');
         try {
-            // 先嘗試使用測試資料，避免啟動時過度負載
+            // 只載入測試資料，不執行實際抓取
             productsCache = generateTestData();
             lastUpdateTime = new Date();
-            addUpdateLog('info', '系統啟動，使用測試資料');
-            
-            // 然後在背景執行實際抓取
-            setTimeout(async () => {
-                if (!isUpdating) {
-                    console.log('背景執行商品抓取...');
-                    try {
-                        await fetchYahooAuctionProducts();
-                    } catch (error) {
-                        console.error('背景抓取失敗:', error);
-                        addUpdateLog('error', `背景抓取失敗: ${error.message}`);
-                    }
-                }
-            }, 30000); // 30秒後執行背景抓取
-            
+            addUpdateLog('info', '系統啟動完成，使用測試資料。請手動觸發更新以獲取實際商品資料。');
+            console.log('系統初始化完成，可接受用戶請求');
         } catch (error) {
             console.error('初始化失敗:', error);
             addUpdateLog('error', `初始化失敗: ${error.message}`);
-        } finally {
-            isUpdating = false;
         }
     }
-}, 10000); // 延遲10秒啟動
+}, 5000); // 延遲5秒啟動
 
 // 啟動伺服器（僅在直接執行時啟動）
 if (require.main === module) {
