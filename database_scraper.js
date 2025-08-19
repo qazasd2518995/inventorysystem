@@ -3,6 +3,7 @@ const puppeteer = require('puppeteer');
 const { 
     initializeDatabase, 
     compareAndUpdateProducts, 
+    upsertProducts,
     getActiveProducts, 
     getProductStats,
     addUpdateLogToDB 
@@ -189,11 +190,11 @@ async function fetchYahooAuctionProductsWithDB() {
             
             allProducts.push(...products);
             
-            // 每5頁存入資料庫
+            // 每5頁存入資料庫（只插入/更新，不檢查下架）
             if (currentPage % 5 === 0 && allProducts.length > 0) {
                 try {
                     console.log(`💾 存入資料庫 (${allProducts.length} 個商品)...`);
-                    await compareAndUpdateProducts(allProducts);
+                    await upsertProducts(allProducts);
                     await addUpdateLogToDB('info', `已處理前 ${currentPage} 頁，共 ${allProducts.length} 個商品`);
                 } catch (dbError) {
                     console.error('資料庫存儲失敗:', dbError.message);
