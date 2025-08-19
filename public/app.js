@@ -604,7 +604,37 @@ function searchProducts(searchTerm) {
             // 搜尋商品名稱
             const nameMatch = product.name.toLowerCase().includes(term);
             
-            // 搜尋價格（支援多種格式，自動處理逗號）
+            // 檢查是否為範圍搜索
+            let isRangeSearch = false;
+            let rangeMatch = false;
+            
+            // 搜尋價格範圍（例如：輸入 "1000-5000" 或 ">2000" 或 "<1000"）
+            if (term.includes('-')) {
+                isRangeSearch = true;
+                const [min, max] = term.split('-').map(n => parseInt(n.replace(/[^\d]/g, '')));
+                if (!isNaN(min) && !isNaN(max)) {
+                    rangeMatch = product.price >= min && product.price <= max;
+                }
+            } else if (term.startsWith('>')) {
+                isRangeSearch = true;
+                const minPrice = parseInt(term.substring(1).replace(/[^\d]/g, ''));
+                if (!isNaN(minPrice)) {
+                    rangeMatch = product.price > minPrice;
+                }
+            } else if (term.startsWith('<')) {
+                isRangeSearch = true;
+                const maxPrice = parseInt(term.substring(1).replace(/[^\d]/g, ''));
+                if (!isNaN(maxPrice)) {
+                    rangeMatch = product.price < maxPrice;
+                }
+            }
+            
+            // 如果是範圍搜索，只檢查名稱匹配和範圍匹配
+            if (isRangeSearch) {
+                return nameMatch || rangeMatch;
+            }
+            
+            // 普通價格搜尋（支援多種格式，自動處理逗號）
             const priceValue = product.price;
             const priceText = priceValue.toString(); // 純數字，如：4200
             const priceWithComma = priceValue.toLocaleString(); // 帶逗號，如：4,200
@@ -619,26 +649,7 @@ function searchProducts(searchTerm) {
                               priceText === cleanTerm ||
                               priceWithComma.replace(/,/g, '') === cleanTerm;
             
-            // 搜尋價格範圍（例如：輸入 "1000-5000" 或 ">2000" 或 "<1000"）
-            let rangeMatch = false;
-            if (term.includes('-')) {
-                const [min, max] = term.split('-').map(n => parseInt(n.replace(/[^\d]/g, '')));
-                if (!isNaN(min) && !isNaN(max)) {
-                    rangeMatch = product.price >= min && product.price <= max;
-                }
-            } else if (term.startsWith('>')) {
-                const minPrice = parseInt(term.substring(1).replace(/[^\d]/g, ''));
-                if (!isNaN(minPrice)) {
-                    rangeMatch = product.price > minPrice;
-                }
-            } else if (term.startsWith('<')) {
-                const maxPrice = parseInt(term.substring(1).replace(/[^\d]/g, ''));
-                if (!isNaN(maxPrice)) {
-                    rangeMatch = product.price < maxPrice;
-                }
-            }
-            
-            return nameMatch || priceMatch || rangeMatch;
+            return nameMatch || priceMatch;
         });
     }
     
