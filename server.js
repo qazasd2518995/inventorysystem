@@ -554,14 +554,28 @@ async function fetchYahooAuctionProductsProgressive() {
         await page.setViewport({ width: 1024, height: 768 });
         await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
+        // 設定額外的請求頭
+        await page.setExtraHTTPHeaders({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-TW,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        });
+        
         while (currentPage <= maxPages) {
-            console.log(`正在載入第 ${currentPage} 頁...`);
-            
-            const pageUrl = currentPage === 1 
-                ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
-                : `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&pg=${currentPage}&mode=list`;
+            let pageUrl = '';
             
             try {
+                console.log(`正在載入第 ${currentPage} 頁...`);
+                
+                pageUrl = currentPage === 1 
+                    ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
+                    : `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&pg=${currentPage}&mode=list`;
+                
+                console.log(`載入URL: ${pageUrl}`);
+                
                 await page.goto(pageUrl, { 
                     waitUntil: 'networkidle2',
                     timeout: 90000 
@@ -810,7 +824,8 @@ async function fetchYahooAuctionProductsProgressive() {
                 await new Promise(resolve => setTimeout(resolve, 1000));
 
             } catch (pageError) {
-                console.error(`抓取第 ${currentPage} 頁時發生錯誤:`, pageError);
+                console.error(`抓取第 ${currentPage} 頁時發生錯誤 (URL: ${pageUrl}):`, pageError.message);
+                addUpdateLog('error', `抓取第 ${currentPage} 頁失敗: ${pageError.message}`);
                 
                 // 如果是超時錯誤，嘗試繼續下一頁
                 if (pageError.message.includes('timeout') || pageError.message.includes('Navigation')) {
@@ -818,6 +833,7 @@ async function fetchYahooAuctionProductsProgressive() {
                     currentPage++;
                     continue;
                 } else {
+                    console.log('嚴重錯誤，停止抓取');
                     break;
                 }
             }
