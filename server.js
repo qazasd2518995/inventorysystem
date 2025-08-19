@@ -565,21 +565,23 @@ async function fetchYahooAuctionProductsProgressive() {
         });
         
         while (currentPage <= maxPages) {
-            let pageUrl = '';
+            console.log(`正在載入第 ${currentPage} 頁...`);
+            
+            const pageUrl = currentPage === 1 
+                ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
+                : `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&pg=${currentPage}&mode=list`;
+            
+            console.log(`載入URL: ${pageUrl}`);
             
             try {
-                console.log(`正在載入第 ${currentPage} 頁...`);
-                
-                pageUrl = currentPage === 1 
-                    ? 'https://tw.bid.yahoo.com/booth/Y1823944291'
-                    : `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&pg=${currentPage}&mode=list`;
-                
-                console.log(`載入URL: ${pageUrl}`);
+                console.log(`開始導航到: ${pageUrl}`);
                 
                 await page.goto(pageUrl, { 
                     waitUntil: 'networkidle2',
                     timeout: 90000 
                 });
+                
+                console.log(`頁面導航成功: ${pageUrl}`);
 
                 // 等待頁面載入
                 await new Promise(resolve => setTimeout(resolve, 3000));
@@ -606,8 +608,8 @@ async function fetchYahooAuctionProductsProgressive() {
                 
                 // 調試：檢查頁面是否正確載入
                 const pageTitle = await page.title();
-                const pageUrl = await page.url();
-                console.log(`頁面載入完成 - 標題: ${pageTitle}, URL: ${pageUrl}`);
+                const currentUrl = await page.url();
+                console.log(`頁面載入完成 - 標題: ${pageTitle}, URL: ${currentUrl}`);
                 
                 console.log(`正在抓取第 ${currentPage} 頁商品資料...`);
 
