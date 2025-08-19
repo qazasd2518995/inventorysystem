@@ -1,8 +1,14 @@
 const { Pool } = require('pg');
+require('dotenv').config();
 
 // PostgreSQL 資料庫配置
 const pool = new Pool({
-    connectionString: 'postgresql://inventory_etrp_user:WDJMfBCcsdDia908CWWeWLD4nswfhIgl@dpg-d2i2gp3uibrs73dqr3vg-a.singapore-postgres.render.com/inventory_etrp',
+    connectionString: process.env.DATABASE_URL || 'postgresql://inventory_etrp_user:WDJMfBCcsdDia908CWWeWLD4nswfhIgl@dpg-d2i2gp3uibrs73dqr3vg-a.singapore-postgres.render.com/inventory_etrp',
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
     ssl: {
         rejectUnauthorized: false // Render 需要 SSL
     }

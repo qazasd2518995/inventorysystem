@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -30,8 +31,8 @@ const PORT = process.env.PORT || 3000;
 
 // 登入系統配置
 const LOGIN_CREDENTIALS = {
-    username: '2518995',
-    password: '2518995'
+    username: process.env.LOGIN_USERNAME || '2518995',
+    password: process.env.LOGIN_PASSWORD || '2518995'
 };
 
 // 中間件
@@ -41,7 +42,7 @@ app.use(express.static('public'));
 
 // 會話管理設定
 app.use(session({
-    secret: 'yahoo-auction-secret-2518995',
+    secret: process.env.SESSION_SECRET || 'yahoo-auction-secret-2518995',
     resave: false,
     saveUninitialized: false,
     cookie: { 
