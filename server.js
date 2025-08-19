@@ -526,7 +526,7 @@ async function fetchYahooAuctionProductsFast() {
     let allProducts = [];
     let browser = null;
     const maxPages = 50;
-    const concurrency = 5; // 同時處理5個頁面，加速抓取
+    const concurrency = 3; // 同時處理3個頁面，平衡速度和穩定性
     const updateInterval = 10; // 每10頁更新一次快取（因為並行處理更快）
 
     try {
@@ -544,7 +544,7 @@ async function fetchYahooAuctionProductsFast() {
                 '--disable-web-security',
                 '--disable-features=VizDisplayCompositor',
                 '--memory-pressure-off',
-                '--disable-javascript', // 禁用JS加速（只要HTML結構）
+                // 保留JavaScript，Yahoo拍賣可能需要JS載入商品
                 '--disable-plugins'
             ],
             timeout: 60000,
@@ -636,9 +636,12 @@ async function scrapePage(browser, pageNum) {
             : `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&pg=${pageNum}&mode=list`;
 
         await page.goto(pageUrl, { 
-            waitUntil: 'domcontentloaded', // 只等待DOM載入，不等所有資源
-            timeout: 20000 // 減少超時時間
+            waitUntil: 'networkidle2', // 等待網絡請求完成，確保商品載入
+            timeout: 30000 
         });
+
+        // 短暫等待確保商品完全載入
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // 快速提取商品資料
         const products = await page.evaluate(() => {
