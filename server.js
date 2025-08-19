@@ -811,6 +811,86 @@ async function fetchYahooAuctionProductsProgressive() {
                     
                     console.log(`最終找到 ${productElements.length} 個商品元素`);
                     
+                    // 如果找不到商品元素，直接使用商品連結
+                    if (productElements.length === 0) {
+                        console.log('使用直接連結解析方法...');
+                        const itemLinks = document.querySelectorAll('a[href*="item/"]');
+                        console.log('直接解析', itemLinks.length, '個商品連結');
+                        
+                        itemLinks.forEach((linkElement, index) => {
+                            try {
+                                const href = linkElement.getAttribute('href');
+                                const match = href.match(/item\/([^?]+)/);
+                                if (!match) return;
+                                
+                                const id = match[1];
+                                let name = linkElement.textContent.trim();
+                                
+                                if (!name) {
+                                    name = linkElement.getAttribute('title') || '';
+                                }
+                                
+                                if (!name.trim()) return;
+                                
+                                // 價格提取
+                                let price = 0;
+                                const pricePatterns = [
+                                    /\$\s?([\d,]+)/,
+                                    /NT\$\s?([\d,]+)/,
+                                    /([\d,]+)\s?元/
+                                ];
+                                
+                                for (const pattern of pricePatterns) {
+                                    const priceMatch = name.match(pattern);
+                                    if (priceMatch) {
+                                        price = parseInt(priceMatch[1].replace(/,/g, ''));
+                                        if (price > 0) break;
+                                    }
+                                }
+                                
+                                // 圖片提取
+                                let imageUrl = '';
+                                const parentElement = linkElement.closest('div, li, tr, td') || linkElement.parentElement;
+                                if (parentElement) {
+                                    const imgElement = parentElement.querySelector('img');
+                                    if (imgElement && imgElement.src && 
+                                        !imgElement.src.includes('item-no-image.svg') && 
+                                        !imgElement.src.includes('loading')) {
+                                        imageUrl = imgElement.src;
+                                    }
+                                }
+                                
+                                const productUrl = href.startsWith('http') ? href : `https://tw.bid.yahoo.com${href}`;
+                                
+                                const product = {
+                                    id: id,
+                                    name: name,
+                                    price: price,
+                                    imageUrl: imageUrl,
+                                    url: productUrl,
+                                    scrapedAt: new Date().toISOString()
+                                };
+                                
+                                items.push(product);
+                                
+                                if (index < 3) {
+                                    console.log(`直接解析商品 ${index + 1}:`, {
+                                        id: product.id,
+                                        name: product.name.substring(0, 30) + '...',
+                                        price: product.price,
+                                        hasImage: !!product.imageUrl
+                                    });
+                                }
+                                
+                            } catch (error) {
+                                console.log(`直接解析第 ${index + 1} 個商品錯誤:`, error.message);
+                            }
+                        });
+                        
+                        console.log(`直接解析成功 ${items.length} 個商品`);
+                        return items;
+                    }
+                    
                     productElements.forEach((element, index) => {
                         try {
                             // 尋找商品連結
