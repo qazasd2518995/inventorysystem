@@ -632,6 +632,88 @@ async function fetchYahooAuctionProductsProgressive() {
                 
                 console.log(`正在抓取第 ${currentPage} 頁商品資料...`);
 
+                // 先在 Node.js 端獲取頁面基本資訊
+                const pageInfo = await page.evaluate(() => {
+                    return {
+                        title: document.title,
+                        url: window.location.href,
+                        htmlLength: document.documentElement.outerHTML.length,
+                        bodyText: document.body.textContent || '',
+                        bodyClassName: document.body.className,
+                        bodyId: document.body.id
+                    };
+                });
+                
+                console.log('=== 頁面基本資訊 ===');
+                console.log('標題:', pageInfo.title);
+                console.log('URL:', pageInfo.url);
+                console.log('HTML長度:', pageInfo.htmlLength);
+                console.log('內容長度:', pageInfo.bodyText.length);
+                console.log('Body類名:', pageInfo.bodyClassName);
+                console.log('Body ID:', pageInfo.bodyId);
+                
+                // 檢查容器和連結
+                const structureInfo = await page.evaluate(() => {
+                    const containers = {};
+                    const possibleContainers = [
+                        'main', '#main', '.main-content', '.content',
+                        '.product-list', '.item-list', '.auction-list',
+                        '.results', '.search-results', '.booth-items'
+                    ];
+                    
+                    possibleContainers.forEach(selector => {
+                        const container = document.querySelector(selector);
+                        if (container) {
+                            containers[selector] = container.children.length;
+                        }
+                    });
+                    
+                    // 檢查所有包含商品ID的連結
+                    const itemLinks = document.querySelectorAll('a[href*="item/"], a[href*="auction/"]');
+                    const linkSamples = [];
+                    for (let i = 0; i < Math.min(3, itemLinks.length); i++) {
+                        linkSamples.push({
+                            href: itemLinks[i].href,
+                            text: itemLinks[i].textContent.trim().substring(0, 50)
+                        });
+                    }
+                    
+                    // 檢查錯誤元素
+                    const errorElements = document.querySelectorAll('.error, .alert, .warning, [class*="error"]');
+                    const errors = [];
+                    errorElements.forEach(el => {
+                        errors.push(el.textContent.trim());
+                    });
+                    
+                    // 檢查登入元素
+                    const loginElements = document.querySelectorAll('input[type="password"], .login, .signin, [class*="login"]');
+                    
+                    return {
+                        containers,
+                        itemLinksCount: itemLinks.length,
+                        linkSamples,
+                        errors,
+                        needsLogin: loginElements.length > 0
+                    };
+                });
+                
+                console.log('=== 頁面結構分析 ===');
+                console.log('找到的容器:', structureInfo.containers);
+                console.log('商品連結數量:', structureInfo.itemLinksCount);
+                if (structureInfo.linkSamples.length > 0) {
+                    console.log('商品連結範例:');
+                    structureInfo.linkSamples.forEach((link, i) => {
+                        console.log(`  ${i + 1}. ${link.href}`);
+                        console.log(`     文字: ${link.text}`);
+                    });
+                }
+                if (structureInfo.errors.length > 0) {
+                    console.log('發現錯誤訊息:', structureInfo.errors);
+                }
+                if (structureInfo.needsLogin) {
+                    console.log('⚠️  可能需要登入');
+                }
+
                 const products = await page.evaluate(() => {
                     const items = [];
                     
@@ -840,6 +922,32 @@ async function fetchYahooAuctionProductsProgressive() {
                 });
 
                 console.log(`第 ${currentPage} 頁找到 ${products.length} 個商品`);
+                
+                // 如果沒有找到商品，截圖用於調試
+                if (products.length === 0 && currentPage === 1) {
+                    try {
+                        console.log('未找到商品，正在截圖用於調試...');
+                        const screenshot = await page.screenshot({ 
+                            fullPage: true,
+                            type: 'png'
+                        });
+                        console.log('截圖完成，大小:', screenshot.length, 'bytes');
+                        
+                        // 也獲取頁面HTML用於分析
+                        const htmlContent = await page.content();
+                        console.log('頁面HTML內容長度:', htmlContent.length);
+                        
+                        // 檢查HTML中是否包含商品相關關鍵字
+                        const hasProductKeywords = htmlContent.includes('item/') || 
+                                                 htmlContent.includes('auction') ||
+                                                 htmlContent.includes('product') ||
+                                                 htmlContent.includes('商品');
+                        console.log('HTML中包含商品關鍵字:', hasProductKeywords);
+                        
+                    } catch (screenshotError) {
+                        console.error('截圖失敗:', screenshotError.message);
+                    }
+                }
                 allProducts = allProducts.concat(products);
 
                 // 每隔幾頁更新一次快取，讓用戶看到即時進度
