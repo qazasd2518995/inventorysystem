@@ -24,14 +24,16 @@ async function initializeDatabase() {
         // 創建商品表
         await client.query(`
             CREATE TABLE IF NOT EXISTS products (
-                id VARCHAR(20) PRIMARY KEY,
+                id VARCHAR(20) NOT NULL,
+                store_type VARCHAR(20) NOT NULL DEFAULT 'yuanzhengshan',
                 name TEXT NOT NULL,
                 price INTEGER DEFAULT 0,
                 image_url TEXT,
                 product_url TEXT,
                 scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_active BOOLEAN DEFAULT TRUE
+                is_active BOOLEAN DEFAULT TRUE,
+                PRIMARY KEY (id, store_type)
             )
         `);
         
@@ -65,14 +67,14 @@ async function initializeDatabase() {
 }
 
 // 插入或更新商品
-async function upsertProduct(product) {
+async function upsertProduct(product, storeType = 'yuanzhengshan') {
     const client = await pool.connect();
     
     try {
         const result = await client.query(`
-            INSERT INTO products (id, name, price, image_url, product_url, scraped_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (id) 
+            INSERT INTO products (id, store_type, name, price, image_url, product_url, scraped_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (id, store_type) 
             DO UPDATE SET 
                 name = EXCLUDED.name,
                 price = EXCLUDED.price,
@@ -83,6 +85,7 @@ async function upsertProduct(product) {
             RETURNING *
         `, [
             product.id,
+            storeType,
             product.name,
             product.price || 0,
             product.imageUrl || null,
@@ -98,13 +101,13 @@ async function upsertProduct(product) {
 }
 
 // 批量插入或更新商品
-async function upsertProducts(products) {
+async function upsertProducts(products, storeType = 'yuanzhengshan') {
     const client = await pool.connect();
     
     try {
         await client.query('BEGIN');
         
-        console.log(`📝 開始批量更新 ${products.length} 個商品到資料庫...`);
+        console.log(`📝 開始批量更新 ${products.length} 個${storeType}商品到資料庫...`);
         
         const results = [];
         const batchSize = 100; // 每次處理100個商品
@@ -114,9 +117,9 @@ async function upsertProducts(products) {
             
             for (const product of batch) {
                 const result = await client.query(`
-                    INSERT INTO products (id, name, price, image_url, product_url, scraped_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (id) 
+                    INSERT INTO products (id, store_type, name, price, image_url, product_url, scraped_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (id, store_type) 
                     DO UPDATE SET 
                         name = EXCLUDED.name,
                         price = EXCLUDED.price,
@@ -127,6 +130,7 @@ async function upsertProducts(products) {
                     RETURNING *
                 `, [
                     product.id,
+                    storeType,
                     product.name,
                     product.price || 0,
                     product.imageUrl || null,
@@ -156,21 +160,21 @@ async function upsertProducts(products) {
 }
 
 // 獲取所有活躍商品
-async function getActiveProducts(limit = null, offset = 0) {
+async function getActiveProducts(storeType = 'yuanzhengshan', limit = null, offset = 0) {
     const client = await pool.connect();
     
     try {
         let query = `
-            SELECT id, name, price, image_url as "imageUrl", product_url as "url", 
+            SELECT id, store_type as "storeType", name, price, image_url as "imageUrl", product_url as "url", 
                    scraped_at as "scrapedAt", updated_at as "updatedAt"
             FROM products 
-            WHERE is_active = TRUE 
+            WHERE is_active = TRUE AND store_type = $1
             ORDER BY updated_at DESC
         `;
         
-        const params = [];
+        const params = [storeType];
         if (limit) {
-            query += ` LIMIT $1 OFFSET $2`;
+            query += ` LIMIT $2 OFFSET $3`;
             params.push(limit, offset);
         }
         
@@ -183,7 +187,7 @@ async function getActiveProducts(limit = null, offset = 0) {
 }
 
 // 獲取商品統計
-async function getProductStats() {
+async function getProductStats(storeType = 'yuanzhengshan') {
     const client = await pool.connect();
     
     try {
@@ -194,8 +198,8 @@ async function getProductStats() {
                 COUNT(CASE WHEN image_url IS NULL OR image_url = '' THEN 1 END) as without_images,
                 MAX(updated_at) as last_update
             FROM products 
-            WHERE is_active = TRUE
-        `);
+            WHERE is_active = TRUE AND store_type = $1
+        `, [storeType]);
         
         const stats = result.rows[0];
         const imageSuccessRate = stats.total > 0 ? 
@@ -215,7 +219,7 @@ async function getProductStats() {
 }
 
 // 標記商品為非活躍（下架）
-async function deactivateProducts(productIds) {
+async function deactivateProducts(productIds, storeType = 'yuanzhengshan') {
     const client = await pool.connect();
     
     try {
@@ -225,9 +229,9 @@ async function deactivateProducts(productIds) {
         const result = await client.query(`
             UPDATE products 
             SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP 
-            WHERE id IN (${placeholders}) 
+            WHERE id IN (${placeholders}) AND store_type = $${productIds.length + 1}
             RETURNING id, name
-        `, productIds);
+        `, [...productIds, storeType]);
         
         return result.rows;
         
@@ -237,19 +241,19 @@ async function deactivateProducts(productIds) {
 }
 
 // 比較並更新商品（增量更新）
-async function compareAndUpdateProducts(newProducts) {
+async function compareAndUpdateProducts(newProducts, storeType = 'yuanzhengshan') {
     const client = await pool.connect();
     
     try {
-        console.log('🔍 開始比較商品差異...');
+        console.log(`🔍 開始比較${storeType}商品差異...`);
         
         // 獲取現有商品
         const existingResult = await client.query(`
             SELECT id, name, price, image_url, product_url, 
                    EXTRACT(EPOCH FROM updated_at) as updated_timestamp
             FROM products 
-            WHERE is_active = TRUE
-        `);
+            WHERE is_active = TRUE AND store_type = $1
+        `, [storeType]);
         
         const existingProducts = new Map(
             existingResult.rows.map(p => [p.id, {
@@ -306,11 +310,11 @@ async function compareAndUpdateProducts(newProducts) {
         
         // 執行更新
         if (productsToUpdate.length > 0) {
-            await upsertProducts(productsToUpdate);
+            await upsertProducts(productsToUpdate, storeType);
         }
         
         if (removedProductIds.length > 0) {
-            await deactivateProducts(removedProductIds);
+            await deactivateProducts(removedProductIds, storeType);
         }
         
         return {

@@ -1780,39 +1780,72 @@ app.get('/api/products', requireAuth, async (req, res) => {
         const storeType = req.query.store || 'yuanzhengshan'; // 預設為源正山
         console.log(`📊 從資料庫獲取${storeType}商品列表...`);
         
-        // 根據賣場類型獲取商品（目前只支援源正山，友茂功能待實現）
+        // 根據賣場類型獲取商品
+        let products, stats;
+        
         if (storeType === 'youmao') {
-            // 友茂賣場（露天市集）- 暫時返回空資料，提示功能開發中
-            console.log('⚠️ 友茂賣場功能開發中...');
-            res.json({
-                success: true,
-                products: [],
-                lastUpdate: null,
-                total: 0,
-                imageStats: {
-                    withImages: 0,
-                    withoutImages: 0,
-                    successRate: '0.0%'
-                },
-                message: '友茂賣場功能開發中，敬請期待！'
-            });
-            return;
-        }
-        
-        // 源正山賣場（Yahoo拍賣）
-        const products = await getActiveProducts();
-        const stats = await getProductStats();
-        
-        console.log(`✅ 從資料庫讀取到 ${products.length} 個商品`);
-        
-        // 如果資料庫沒有資料，觸發初始化抓取
-        if (products.length === 0) {
-            console.log('⚠️ 資料庫無資料，觸發初始化抓取...');
-            try {
-                await fetchYahooAuctionProducts();
-                // 重新從資料庫讀取
-                const newProducts = await getActiveProducts();
-                const newStats = await getProductStats();
+            // 友茂賣場（露天市集）
+            products = await getActiveProducts(storeType);
+            stats = await getProductStats(storeType);
+            
+            console.log(`✅ 從資料庫讀取到 ${products.length} 個友茂商品`);
+            
+            // 如果友茂資料庫沒有資料，觸發初始化抓取
+            if (products.length === 0) {
+                console.log('⚠️ 友茂資料庫無資料，觸發初始化抓取...');
+                try {
+                    const { fetchRutenProducts } = require('./ruten_scraper');
+                    await fetchRutenProducts();
+                    
+                    // 重新從資料庫讀取
+                    const newProducts = await getActiveProducts(storeType);
+                    const newStats = await getProductStats(storeType);
+                    
+                    res.json({
+                        success: true,
+                        products: newProducts,
+                        lastUpdate: newStats.lastUpdate,
+                        total: newStats.total,
+                        imageStats: {
+                            withImages: newStats.withImages,
+                            withoutImages: newStats.withoutImages,
+                            successRate: newStats.imageSuccessRate
+                        }
+                    });
+                    return;
+                } catch (error) {
+                    console.error('友茂初始化抓取失敗:', error.message);
+                    // 返回空資料作為備用
+                    res.json({
+                        success: true,
+                        products: [],
+                        lastUpdate: null,
+                        total: 0,
+                        imageStats: {
+                            withImages: 0,
+                            withoutImages: 0,
+                            successRate: '0.0%'
+                        },
+                        message: '友茂商品抓取中，請稍候再試...'
+                    });
+                    return;
+                }
+            }
+        } else {
+            // 源正山賣場（Yahoo拍賣）
+            products = await getActiveProducts(storeType);
+            stats = await getProductStats(storeType);
+            
+            console.log(`✅ 從資料庫讀取到 ${products.length} 個${storeType}商品`);
+            
+            // 如果源正山資料庫沒有資料，觸發初始化抓取
+            if (products.length === 0) {
+                console.log('⚠️ 源正山資料庫無資料，觸發初始化抓取...');
+                try {
+                    await fetchYahooAuctionProducts();
+                    // 重新從資料庫讀取
+                    const newProducts = await getActiveProducts(storeType);
+                    const newStats = await getProductStats(storeType);
                 
                 res.json({
                     success: true,
@@ -1845,7 +1878,7 @@ app.get('/api/products', requireAuth, async (req, res) => {
             }
         }
         
-        // 智慧更新邏輯（暫時停用，直接返回資料庫資料）
+        }        // 智慧更新邏輯（暫時停用，直接返回資料庫資料）
         /*
         else if (!isUpdating && lastUpdateTime && 
                 ((now - lastUpdateTime) > 5 * 60 * 1000 && 
@@ -2167,17 +2200,8 @@ app.get('/api/export', requireAuth, async (req, res) => {
         console.log(`📊 從資料庫讀取${storeType}商品進行Excel匯出...`);
         
         // 根據賣場類型獲取商品
-        if (storeType === 'youmao') {
-            // 友茂賣場（露天市集）- 暫時返回錯誤
-            return res.status(400).json({
-                success: false,
-                error: '友茂賣場功能開發中，暫不支援Excel匯出'
-            });
-        }
-        
-        // 源正山賣場（Yahoo拍賣）
-        const products = await getActiveProducts();
-        const stats = await getProductStats();
+        const products = await getActiveProducts(storeType);
+        const stats = await getProductStats(storeType);
         
         console.log(`✅ 從資料庫讀取到 ${products.length} 個商品用於Excel匯出`);
         
