@@ -1794,7 +1794,7 @@ app.get('/api/products', requireAuth, async (req, res) => {
             if (products.length === 0) {
                 console.log('⚠️ 友茂資料庫無資料，觸發初始化抓取...');
                 try {
-                    const { fetchRutenProducts } = require('./ruten_scraper');
+                    const { fetchRutenProducts } = require('./ruten_scraper_stable');
                     await fetchRutenProducts();
                     
                     // 重新從資料庫讀取
