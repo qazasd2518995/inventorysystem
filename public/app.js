@@ -276,7 +276,7 @@ function displayProducts(products) {
                 <button class="btn btn-sm btn-outline-primary me-1" onclick="showProductDetail('${product.id}')">
                     <i class="bi bi-eye"></i> 檢視
                 </button>
-                <a href="${product.link}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                <a href="${product.url}" target="_blank" class="btn btn-sm btn-outline-secondary">
                     <i class="bi bi-box-arrow-up-right"></i> 前往
                 </a>
             </td>
@@ -313,7 +313,7 @@ function showProductDetail(productId) {
     document.getElementById('modalTitle').textContent = product.name;
     document.getElementById('modalId').textContent = product.id;
     document.getElementById('modalPrice').textContent = product.price.toLocaleString();
-    document.getElementById('modalLink').href = product.link;
+    document.getElementById('modalLink').href = product.url;
     
     // 顯示 Modal
     const modal = new bootstrap.Modal(document.getElementById('productModal'));
