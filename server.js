@@ -2399,8 +2399,30 @@ app.get('/api/update-logs', requireAuth, async (req, res) => {
     }
 });
 
-// API路由 - 清除更新日誌
+// API路由 - 清除更新日誌 (DELETE方法)
 app.delete('/api/update-logs', requireAuth, async (req, res) => {
+    try {
+        const oldCount = updateLogs.length;
+        updateLogs = [];
+        
+        addUpdateLog('info', `手動清除了 ${oldCount} 條更新日誌`);
+        
+        res.json({
+            success: true,
+            message: `已清除 ${oldCount} 條更新日誌`,
+            remainingLogs: updateLogs.length
+        });
+    } catch (error) {
+        console.error('清除更新日誌 API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API路由 - 清除更新日誌 (POST方法，兼容前端調用)
+app.post('/api/clear-logs', requireAuth, async (req, res) => {
     try {
         const oldCount = updateLogs.length;
         updateLogs = [];
