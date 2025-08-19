@@ -40,11 +40,7 @@ async function fetchYahooAuctionProducts() {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--disable-gpu',
-                '--single-process',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
+                '--disable-gpu'
             ],
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
         });
@@ -653,8 +649,28 @@ app.get('/api/export', async (req, res) => {
     }
 });
 
-// Vercel serverless環境不支援定時任務和初始化抓取
-// 改為按需抓取（在API請求時觸發）
+// 設定定時更新 - 每30分鐘自動更新一次（適合Render持續運行）
+setInterval(async () => {
+    if (!isUpdating) {
+        console.log('執行定時更新...');
+        isUpdating = true;
+        try {
+            await fetchYahooAuctionProducts();
+        } catch (error) {
+            console.error('定時更新失敗:', error);
+        } finally {
+            isUpdating = false;
+        }
+    }
+}, 30 * 60 * 1000); // 30分鐘
+
+// 啟動時立即抓取一次資料
+setTimeout(() => {
+    if (!isUpdating) {
+        console.log('啟動初始化抓取...');
+        fetchYahooAuctionProducts().catch(console.error);
+    }
+}, 5000); // 延遲5秒啟動
 
 // 啟動伺服器（僅在直接執行時啟動）
 if (require.main === module) {
