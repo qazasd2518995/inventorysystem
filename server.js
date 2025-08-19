@@ -612,6 +612,33 @@ async function fetchYahooAuctionProductsFast() {
     }
 
     console.log(`並行抓取完成！總共成功抓取 ${allProducts.length} 個商品`);
+    
+    // 確保最後一批商品也更新到快取
+    if (allProducts.length > 0) {
+        const productsWithTime = allProducts.map(product => ({
+            ...product,
+            lastUpdated: new Date().toISOString()
+        }));
+        
+        productsCache = productsWithTime;
+        lastUpdateTime = new Date();
+        console.log(`[FINAL] 最終更新快取：${allProducts.length} 個商品`);
+        
+        // 更新商品雜湊對照表
+        productHashMap = new Map();
+        allProducts.forEach(product => {
+            const hash = crypto.createHash('md5').update(JSON.stringify({
+                name: product.name,
+                price: product.price
+            })).digest('hex');
+            productHashMap.set(product.id, hash);
+        });
+        
+        lastFullScanTime = new Date();
+        addUpdateLog('success', `並行抓取完成：共 ${allProducts.length} 個商品`);
+        console.log('已更新商品雜湊對照表，共', productHashMap.size, '個商品');
+    }
+    
     return allProducts;
 }
 
