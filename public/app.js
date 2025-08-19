@@ -260,27 +260,27 @@ function displayProducts(products) {
         
         row.innerHTML = `
             <td>
-                <img src="${product.imageUrl || 'https://via.placeholder.com/60'}" 
+                <img src="${product.imageUrl || 'https://via.placeholder.com/100'}" 
                      alt="${product.name}" 
-                     class="product-img"
-                     onerror="this.src='https://via.placeholder.com/60'"
+                     class="product-img-mobile"
+                     onerror="this.src='https://via.placeholder.com/100'"
                      onclick="showProductDetail('${product.id}')">
             </td>
-            <td>${product.id}</td>
+            <td class="price-tag-mobile">NT$ ${product.price.toLocaleString()}</td>
             <td>
-                <div class="text-truncate" style="max-width: 300px;" title="${product.name}">
+                <div class="product-name-mobile" title="${product.name}">
                     ${product.name}
                 </div>
             </td>
-            <td class="price-tag">NT$ ${product.price.toLocaleString()}</td>
             <td>
                 <button class="btn btn-sm btn-outline-primary me-1" onclick="showProductDetail('${product.id}')">
-                    <i class="bi bi-eye"></i> 檢視
+                    <i class="bi bi-eye"></i>
                 </button>
                 <a href="${product.url}" target="_blank" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-box-arrow-up-right"></i> 前往
+                    <i class="bi bi-box-arrow-up-right"></i>
                 </a>
             </td>
+            <td class="d-none">${product.id}</td>
         `;
         
         tbody.appendChild(row);
