@@ -3,11 +3,13 @@ let allProducts = [];
 let filteredProducts = [];
 let autoRefreshInterval = null;
 let isAuthenticated = false;
+let currentStore = 'yuanzhengshan'; // 預設為源正山
 
 // DOM 載入完成後初始化
 document.addEventListener('DOMContentLoaded', function() {
     checkAuthStatus();
     initializeSearch();
+    initializeStoreSelector();
 });
 
 // 檢查登入狀態
@@ -165,7 +167,7 @@ async function loadProducts() {
     hideError();
     
     try {
-        const response = await axios.get('/api/products');
+        const response = await axios.get(`/api/products?store=${currentStore}`);
         
         if (response.data.success) {
             allProducts = response.data.products;
@@ -681,5 +683,191 @@ function initializeSearch() {
                 searchProducts(e.target.value);
             }
         });
+    }
+}
+
+// 初始化賣場選擇器
+function initializeStoreSelector() {
+    const storeRadios = document.querySelectorAll('input[name="storeSelector"]');
+    storeRadios.forEach(radio => {
+        radio.addEventListener('change', function(e) {
+            if (e.target.checked) {
+                switchStore(e.target.value);
+            }
+        });
+    });
+}
+
+// 切換賣場
+async function switchStore(storeType) {
+    if (storeType === currentStore) return;
+    
+    const oldStore = currentStore;
+    currentStore = storeType;
+    
+    // 更新界面顯示
+    updateStoreInfo(storeType);
+    
+    // 清空當前商品資料
+    allProducts = [];
+    filteredProducts = [];
+    displayProducts([]);
+    
+    // 清空搜尋框
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.value = '';
+    }
+    
+    // 隱藏搜尋結果提示
+    const searchInfo = document.getElementById('searchResultsInfo');
+    if (searchInfo) {
+        searchInfo.style.display = 'none';
+    }
+    
+    // 顯示載入狀態
+    showLoadingState();
+    
+    try {
+        // 載入新賣場的商品資料
+        await loadProductsForStore(storeType);
+        showSuccess(`已切換至${getStoreDisplayName(storeType)}`);
+    } catch (error) {
+        console.error('切換賣場失敗:', error);
+        showError(`切換至${getStoreDisplayName(storeType)}失敗，請稍後再試`);
+        
+        // 切換失敗，恢復原來的選擇
+        currentStore = oldStore;
+        const oldRadio = document.getElementById(`store-${oldStore}`);
+        if (oldRadio) {
+            oldRadio.checked = true;
+        }
+        updateStoreInfo(oldStore);
+    }
+}
+
+// 更新賣場資訊顯示
+function updateStoreInfo(storeType) {
+    const storeInfo = document.getElementById('currentStoreInfo');
+    if (storeInfo) {
+        const storeData = getStoreData(storeType);
+        storeInfo.innerHTML = `
+            <i class="${storeData.icon}"></i> ${storeData.name} (${storeData.platform})
+        `;
+    }
+}
+
+// 獲取賣場資料
+function getStoreData(storeType) {
+    const stores = {
+        'yuanzhengshan': {
+            name: '源正山鋼索五金行',
+            platform: 'Yahoo拍賣',
+            icon: 'bi bi-building',
+            url: 'https://tw.bid.yahoo.com/booth/Y1823944291'
+        },
+        'youmao': {
+            name: '友茂',
+            platform: '露天市集',
+            icon: 'bi bi-tools',
+            url: 'https://www.ruten.com.tw/store/u-mo0955900924/'
+        }
+    };
+    return stores[storeType] || stores['yuanzhengshan'];
+}
+
+// 獲取賣場顯示名稱
+function getStoreDisplayName(storeType) {
+    return getStoreData(storeType).name;
+}
+
+// 為特定賣場載入商品資料
+async function loadProductsForStore(storeType) {
+    try {
+        const response = await axios.get(`/api/products?store=${storeType}`);
+        
+        if (response.data.success) {
+            allProducts = response.data.products;
+            filteredProducts = allProducts;
+            
+            // 更新統計資訊
+            updateStatistics(response.data);
+            
+            // 顯示商品列表
+            displayProducts(filteredProducts);
+            
+            // 更新最後更新時間
+            updateLastUpdateTime(response.data.lastUpdate);
+            
+            hideLoadingState();
+        } else {
+            throw new Error(response.data.message || '載入商品資料失敗');
+        }
+    } catch (error) {
+        console.error('載入商品資料時發生錯誤:', error);
+        hideLoadingState();
+        throw error;
+    }
+}
+
+// 顯示載入狀態
+function showLoadingState() {
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const productsTable = document.getElementById('productsTable');
+    const noDataMessage = document.getElementById('noDataMessage');
+    
+    if (loadingSpinner) loadingSpinner.style.display = 'block';
+    if (productsTable) productsTable.style.display = 'none';
+    if (noDataMessage) noDataMessage.style.display = 'none';
+    
+    // 重置統計資訊
+    updateStatistics({
+        total: 0,
+        lastUpdate: null,
+        imageStats: { withImages: 0, withoutImages: 0, successRate: 0 }
+    });
+}
+
+// 隱藏載入狀態
+function hideLoadingState() {
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    if (loadingSpinner) loadingSpinner.style.display = 'none';
+}
+
+// 匯出Excel
+async function exportExcel() {
+    const exportBtn = event.target;
+    const originalText = exportBtn.innerHTML;
+    
+    exportBtn.disabled = true;
+    exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>匯出中...';
+    
+    try {
+        const storeData = getStoreData(currentStore);
+        const response = await axios.get(`/api/export?store=${currentStore}`, {
+            responseType: 'blob'
+        });
+        
+        // 創建下載連結
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        
+        // 根據賣場設定檔案名稱
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+        link.download = `${storeData.name}_商品清單_${timestamp}.xlsx`;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        showSuccess(`${storeData.name} Excel檔案匯出成功！`);
+    } catch (error) {
+        console.error('匯出Excel失敗:', error);
+        showError('匯出Excel失敗，請稍後再試');
+    } finally {
+        exportBtn.disabled = false;
+        exportBtn.innerHTML = originalText;
     }
 }

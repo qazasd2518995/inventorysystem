@@ -68,6 +68,38 @@
 
     <!-- 主要內容區域 -->
     <div id="mainContainer" class="container-fluid mt-4" style="display: none;">
+        <!-- 賣場選擇器 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-primary">
+                    <div class="card-body py-3">
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-shop me-2" style="font-size: 1.5rem; color: #0d6efd;"></i>
+                                <h5 class="mb-0 me-3">選擇賣場：</h5>
+                                <div class="btn-group" role="group">
+                                    <input type="radio" class="btn-check" name="storeSelector" id="store-yuanzhengshan" value="yuanzhengshan" checked>
+                                    <label class="btn btn-outline-primary" for="store-yuanzhengshan">
+                                        <i class="bi bi-building"></i> 源正山鋼索五金行
+                                    </label>
+                                    
+                                    <input type="radio" class="btn-check" name="storeSelector" id="store-youmao" value="youmao">
+                                    <label class="btn btn-outline-primary" for="store-youmao">
+                                        <i class="bi bi-tools"></i> 友茂
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center">
+                                <span id="currentStoreInfo" class="badge bg-primary fs-6 px-3 py-2">
+                                    <i class="bi bi-building"></i> 源正山鋼索五金行 (Yahoo拍賣)
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <div class="row mb-3">
             <div class="col-md-6">
                 <div class="card">

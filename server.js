@@ -1777,9 +1777,29 @@ app.get('/api/auth-status', (req, res) => {
 // API路由 - 取得商品列表（從資料庫讀取）
 app.get('/api/products', requireAuth, async (req, res) => {
     try {
-        console.log('📊 從資料庫獲取商品列表...');
+        const storeType = req.query.store || 'yuanzhengshan'; // 預設為源正山
+        console.log(`📊 從資料庫獲取${storeType}商品列表...`);
         
-        // 從資料庫獲取商品
+        // 根據賣場類型獲取商品（目前只支援源正山，友茂功能待實現）
+        if (storeType === 'youmao') {
+            // 友茂賣場（露天市集）- 暫時返回空資料，提示功能開發中
+            console.log('⚠️ 友茂賣場功能開發中...');
+            res.json({
+                success: true,
+                products: [],
+                lastUpdate: null,
+                total: 0,
+                imageStats: {
+                    withImages: 0,
+                    withoutImages: 0,
+                    successRate: '0.0%'
+                },
+                message: '友茂賣場功能開發中，敬請期待！'
+            });
+            return;
+        }
+        
+        // 源正山賣場（Yahoo拍賣）
         const products = await getActiveProducts();
         const stats = await getProductStats();
         
@@ -2143,9 +2163,19 @@ app.post('/api/refresh', async (req, res) => {
 // API路由 - 匯出Excel（從資料庫讀取）
 app.get('/api/export', requireAuth, async (req, res) => {
     try {
-        console.log('📊 從資料庫讀取商品進行Excel匯出...');
+        const storeType = req.query.store || 'yuanzhengshan'; // 預設為源正山
+        console.log(`📊 從資料庫讀取${storeType}商品進行Excel匯出...`);
         
-        // 直接從資料庫獲取最新商品資料
+        // 根據賣場類型獲取商品
+        if (storeType === 'youmao') {
+            // 友茂賣場（露天市集）- 暫時返回錯誤
+            return res.status(400).json({
+                success: false,
+                error: '友茂賣場功能開發中，暫不支援Excel匯出'
+            });
+        }
+        
+        // 源正山賣場（Yahoo拍賣）
         const products = await getActiveProducts();
         const stats = await getProductStats();
         
@@ -2161,7 +2191,11 @@ app.get('/api/export', requireAuth, async (req, res) => {
 
         // 建立新的工作簿
         const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet('商品列表');
+        const storeNames = {
+            'yuanzhengshan': '源正山',
+            'youmao': '友茂'
+        };
+        const worksheet = workbook.addWorksheet(storeNames[storeType] || '商品列表');
 
         // 設定欄位
         worksheet.columns = [
