@@ -249,6 +249,261 @@ async function quickChangeDetection() {
     }
 }
 
+// 全面檢測商品變更的函數（檢查所有頁面）
+async function fullChangeDetection() {
+    console.log('正在進行全面商品變更檢測...');
+    let browser = null;
+    
+    try {
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu'
+            ],
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+        });
+
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+        let changesDetected = false;
+        let newProductsCount = 0;
+        let modifiedProductsCount = 0;
+        let removedProductsCount = 0;
+        let allCurrentProducts = [];
+        let currentPage = 1;
+        const maxPages = 50; // 安全上限
+
+        // 檢查所有頁面
+        while (currentPage <= maxPages) {
+            console.log(`全面檢測第 ${currentPage} 頁...`);
+            
+            const url = `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&p=${currentPage}&mode=list`;
+            
+            try {
+                await page.goto(url, { 
+                    waitUntil: 'networkidle2',
+                    timeout: 30000 
+                });
+
+                // 滾動頁面確保所有商品載入
+                await page.evaluate(() => {
+                    return new Promise((resolve) => {
+                        let totalHeight = 0;
+                        const distance = 200;
+                        const timer = setInterval(() => {
+                            const scrollHeight = document.body.scrollHeight;
+                            window.scrollBy(0, distance);
+                            totalHeight += distance;
+
+                            if (totalHeight >= scrollHeight) {
+                                clearInterval(timer);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                });
+
+                // 等待頁面完全載入
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                // 提取商品資料
+                const products = await page.evaluate(() => {
+                    const items = [];
+                    const productElements = document.querySelectorAll('.item');
+                    
+                    productElements.forEach(element => {
+                        try {
+                            const linkElement = element.querySelector('a[href*="item/"]');
+                            if (!linkElement) return;
+                            
+                            const href = linkElement.getAttribute('href');
+                            const match = href.match(/item\/([^?]+)/);
+                            if (!match) return;
+                            
+                            const id = match[1];
+                            const nameElement = element.querySelector('.name a, .title a, [title]');
+                            const name = nameElement ? (nameElement.textContent || nameElement.getAttribute('title') || '').trim() : '';
+                            
+                            if (name && id) {
+                                // 價格提取
+                                const priceText = name;
+                                let price = 0;
+                                const priceMatch = priceText.match(/\$?([\d,]+)/);
+                                if (priceMatch) {
+                                    price = parseInt(priceMatch[1].replace(/,/g, ''));
+                                }
+                                
+                                // 圖片提取
+                                const imgElement = element.querySelector('img');
+                                const imageUrl = imgElement ? imgElement.src : '';
+                                
+                                const link = `https://tw.bid.yahoo.com${href}`;
+                                
+                                items.push({ id, name, price, imageUrl, link });
+                            }
+                        } catch (error) {
+                            console.error('解析商品時發生錯誤:', error);
+                        }
+                    });
+                    
+                    return items;
+                });
+
+                console.log(`第 ${currentPage} 頁找到 ${products.length} 個商品`);
+
+                // 如果沒有商品或商品數量太少，可能已到最後一頁
+                if (products.length === 0) {
+                    console.log(`第 ${currentPage} 頁無商品，停止檢測`);
+                    break;
+                }
+
+                // 將商品添加到總列表
+                allCurrentProducts = allCurrentProducts.concat(products);
+
+                // 檢查每個商品是否有變更
+                for (const product of products) {
+                    const newHash = generateProductHash(product);
+                    const oldHash = productHashMap.get(product.id);
+                    
+                    if (!oldHash) {
+                        // 新商品
+                        newProductsCount++;
+                        changesDetected = true;
+                        console.log(`發現新商品: ${product.name} (ID: ${product.id})`);
+                    } else if (oldHash !== newHash) {
+                        // 修改的商品
+                        modifiedProductsCount++;
+                        changesDetected = true;
+                        console.log(`發現商品變更: ${product.name} (ID: ${product.id})`);
+                    }
+                }
+
+                // 檢查是否還有下一頁
+                const hasNextPage = await page.evaluate(() => {
+                    // 檢查分頁連結
+                    const nextLinks = document.querySelectorAll('a');
+                    for (let link of nextLinks) {
+                        if (link.textContent.includes('下一頁') || link.textContent.includes('Next')) {
+                            return true;
+                        }
+                    }
+                    
+                    // 檢查頁碼
+                    const pageLinks = document.querySelectorAll('a[href*="&p="]');
+                    const currentPageNum = parseInt(window.location.search.match(/[?&]p=(\d+)/)?.[1] || '1');
+                    
+                    for (let link of pageLinks) {
+                        const pageMatch = link.href.match(/[?&]p=(\d+)/);
+                        if (pageMatch && parseInt(pageMatch[1]) > currentPageNum) {
+                            return true;
+                        }
+                    }
+                    
+                    return false;
+                });
+
+                if (!hasNextPage) {
+                    console.log(`第 ${currentPage} 頁為最後一頁，停止檢測`);
+                    break;
+                }
+
+                currentPage++;
+                // 避免請求過快
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+            } catch (pageError) {
+                console.error(`檢測第 ${currentPage} 頁時發生錯誤:`, pageError);
+                break;
+            }
+        }
+
+        // 檢查已移除的商品
+        const currentProductIds = new Set(allCurrentProducts.map(p => p.id));
+        for (const [oldId, oldHash] of productHashMap) {
+            if (!currentProductIds.has(oldId)) {
+                removedProductsCount++;
+                changesDetected = true;
+                console.log(`發現商品已移除: ID ${oldId}`);
+            }
+        }
+
+        console.log(`全面檢測結果: 檢查了 ${currentPage - 1} 頁，共 ${allCurrentProducts.length} 個商品`);
+        console.log(`變更統計: 新增 ${newProductsCount} 個, 修改 ${modifiedProductsCount} 個, 移除 ${removedProductsCount} 個`);
+        
+        return { 
+            changesDetected, 
+            newProductsCount, 
+            modifiedProductsCount, 
+            removedProductsCount,
+            totalProducts: allCurrentProducts.length,
+            totalPages: currentPage - 1,
+            currentProducts: allCurrentProducts
+        };
+
+    } catch (error) {
+        console.error('全面變更檢測失敗:', error);
+        return { 
+            changesDetected: true, 
+            newProductsCount: 0, 
+            modifiedProductsCount: 0, 
+            removedProductsCount: 0,
+            totalProducts: 0,
+            totalPages: 0,
+            currentProducts: []
+        };
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+}
+
+// 部分更新商品資料的函數
+async function partialUpdateProducts(detectionResult) {
+    if (!detectionResult.changesDetected) {
+        addUpdateLog('info', '無需更新，商品資料已是最新');
+        return productsCache;
+    }
+
+    const { currentProducts, newProductsCount, modifiedProductsCount, removedProductsCount } = detectionResult;
+    
+    addUpdateLog('info', `開始部分更新：新增 ${newProductsCount}，修改 ${modifiedProductsCount}，移除 ${removedProductsCount}`);
+
+    // 為新的商品資料添加更新時間
+    const productsWithTime = currentProducts.map(product => ({
+        ...product,
+        updateTime: new Date().toISOString()
+    }));
+
+    // 比較並記錄變更
+    if (productsCache.length > 0) {
+        compareAndLogChanges(productsCache, productsWithTime);
+    }
+
+    // 更新快取
+    productsCache = productsWithTime;
+    lastUpdateTime = new Date();
+    
+    // 更新商品雜湊對照表
+    productHashMap.clear();
+    productsWithTime.forEach(product => {
+        const hash = generateProductHash(product);
+        productHashMap.set(product.id, hash);
+    });
+    
+    console.log(`部分更新完成，商品雜湊對照表已更新，共 ${productHashMap.size} 個商品`);
+    addUpdateLog('success', `部分更新完成：共 ${productsWithTime.length} 個商品`);
+    
+    return productsWithTime;
+}
+
 // 爬蟲函數 - 使用 Puppeteer 抓取奇摩拍賣商品資料
 async function fetchYahooAuctionProducts() {
     let allProducts = [];
@@ -737,15 +992,16 @@ app.get('/api/products', async (req, res) => {
             
             isUpdating = true;
             try {
-                // 先進行快速變更檢測
-                addUpdateLog('info', '開始快速變更檢測...');
-                const { changesDetected, newProductsCount, modifiedProductsCount } = await quickChangeDetection();
+                // 進行全面商品變更檢測
+                addUpdateLog('info', '開始全面商品變更檢測...');
+                const detectionResult = await fullChangeDetection();
                 
-                if (changesDetected) {
-                    addUpdateLog('warning', `檢測到商品變更（新增 ${newProductsCount} 個，修改 ${modifiedProductsCount} 個），執行完整更新...`);
-                    await fetchYahooAuctionProducts();
+                if (detectionResult.changesDetected) {
+                    const { newProductsCount, modifiedProductsCount, removedProductsCount } = detectionResult;
+                    addUpdateLog('warning', `檢測到商品變更（新增 ${newProductsCount} 個，修改 ${modifiedProductsCount} 個，移除 ${removedProductsCount} 個），執行部分更新...`);
+                    await partialUpdateProducts(detectionResult);
                 } else {
-                    addUpdateLog('info', '未檢測到商品變更，跳過完整更新');
+                    addUpdateLog('info', '未檢測到商品變更，跳過更新');
                     lastUpdateTime = new Date(); // 更新檢查時間
                 }
             } finally {
@@ -770,7 +1026,7 @@ app.get('/api/products', async (req, res) => {
     }
 });
 
-// API路由 - 手動快速檢測更新
+// API路由 - 手動全面檢測更新
 app.get('/api/check-updates', async (req, res) => {
     try {
         if (isUpdating) {
@@ -780,19 +1036,75 @@ app.get('/api/check-updates', async (req, res) => {
             });
         }
 
-        const { changesDetected, newProductsCount, modifiedProductsCount } = await quickChangeDetection();
+        addUpdateLog('info', '手動觸發全面商品變更檢測...');
+        const detectionResult = await fullChangeDetection();
         
         res.json({
             success: true,
-            changesDetected,
-            newProductsCount,
-            modifiedProductsCount,
-            message: changesDetected ? 
-                `發現變更：新增 ${newProductsCount} 個商品，修改 ${modifiedProductsCount} 個商品` :
+            ...detectionResult,
+            message: detectionResult.changesDetected ? 
+                `發現變更：新增 ${detectionResult.newProductsCount} 個，修改 ${detectionResult.modifiedProductsCount} 個，移除 ${detectionResult.removedProductsCount} 個商品` :
                 '未發現商品變更'
         });
     } catch (error) {
         console.error('快速檢測 API 錯誤:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API路由 - 手動觸發部分更新（檢測並更新變更）
+app.get('/api/partial-update', async (req, res) => {
+    try {
+        if (isUpdating) {
+            return res.json({
+                success: false,
+                message: '系統正在更新中，請稍後再試'
+            });
+        }
+
+        isUpdating = true;
+        addUpdateLog('info', '手動觸發部分更新...');
+        
+        try {
+            // 先檢測變更
+            const detectionResult = await fullChangeDetection();
+            
+            if (detectionResult.changesDetected) {
+                // 執行部分更新
+                await partialUpdateProducts(detectionResult);
+                
+                res.json({
+                    success: true,
+                    message: `部分更新完成：新增 ${detectionResult.newProductsCount} 個，修改 ${detectionResult.modifiedProductsCount} 個，移除 ${detectionResult.removedProductsCount} 個商品`,
+                    products: productsCache,
+                    lastUpdate: lastUpdateTime,
+                    total: productsCache.length,
+                    updateStats: {
+                        newProducts: detectionResult.newProductsCount,
+                        modifiedProducts: detectionResult.modifiedProductsCount,
+                        removedProducts: detectionResult.removedProductsCount,
+                        totalProducts: detectionResult.totalProducts,
+                        totalPages: detectionResult.totalPages
+                    }
+                });
+            } else {
+                res.json({
+                    success: true,
+                    message: '未發現商品變更，無需更新',
+                    products: productsCache,
+                    lastUpdate: lastUpdateTime,
+                    total: productsCache.length
+                });
+            }
+        } finally {
+            isUpdating = false;
+        }
+    } catch (error) {
+        console.error('部分更新 API 錯誤:', error);
+        addUpdateLog('error', `部分更新失敗: ${error.message}`);
         res.status(500).json({
             success: false,
             error: error.message
