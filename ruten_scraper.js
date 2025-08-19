@@ -53,7 +53,7 @@ async function fetchRutenProducts(storeUrl = 'https://www.ruten.com.tw/store/u-m
 
         let currentPage = 1;
         let hasMorePages = true;
-        const maxPages = parseInt(process.env.MAX_PAGES) || 50;
+        const maxPages = parseInt(process.env.MAX_PAGES) || 45; // 露天市集共44頁，設為45以確保完整
 
         while (hasMorePages && currentPage <= maxPages) {
             console.log(`📄 正在載入第 ${currentPage} 頁...`);
@@ -133,18 +133,34 @@ async function fetchRutenProducts(storeUrl = 'https://www.ruten.com.tw/store/u-m
                                     }
                                 }
 
-                                // 商品價格 - 從父元素或相鄰元素獲取
+                                // 商品價格 - 使用更精確的價格選擇器
                                 let price = 0;
-                                const parentElement = linkElement.closest('[class*="item"], [class*="product"]') || linkElement.parentElement;
+                                const parentElement = linkElement.closest('[class*="item"], [class*="product"], .rt-product-card') || linkElement.parentElement;
                                 if (parentElement) {
-                                    const priceElements = parentElement.querySelectorAll('[class*="price"], .money, [class*="cost"], [class*="amount"]');
-                                    for (const priceEl of priceElements) {
-                                        const priceText = priceEl.textContent || '';
-                                        const priceMatch = priceText.match(/[\d,]+/);
-                                        if (priceMatch) {
-                                            price = parseInt(priceMatch[0].replace(/,/g, ''));
-                                            break;
+                                    // 優先使用露天市集特定的價格選擇器
+                                    const priceSelectors = [
+                                        '.text-price-dollar',
+                                        '.rt-text-price.text-price-dollar', 
+                                        '.rt-text-price',
+                                        '.rt-product-card-price-wrap .text-price-dollar',
+                                        '[class*="price"] .text-price-dollar',
+                                        '[class*="price"]'
+                                    ];
+                                    
+                                    for (const selector of priceSelectors) {
+                                        const priceElements = parentElement.querySelectorAll(selector);
+                                        for (const priceEl of priceElements) {
+                                            const priceText = priceEl.textContent || '';
+                                            const priceMatch = priceText.match(/[\d,]+/);
+                                            if (priceMatch) {
+                                                const parsedPrice = parseInt(priceMatch[0].replace(/,/g, ''));
+                                                if (parsedPrice > 0) {
+                                                    price = parsedPrice;
+                                                    break;
+                                                }
+                                            }
                                         }
+                                        if (price > 0) break;
                                     }
                                 }
 
@@ -211,13 +227,33 @@ async function fetchRutenProducts(storeUrl = 'https://www.ruten.com.tw/store/u-m
                     }
                 }
 
-                // 檢查是否有下一頁
+                // 檢查是否有下一頁 - 根據調試結果優化
                 const hasNextPage = await page.evaluate(() => {
-                    // 露天市集分頁檢查（需要根據實際網頁結構調整）
-                    const nextButton = document.querySelector('.rt-pagination-next:not(.disabled), .pagination-next:not(.disabled), .next:not(.disabled)');
-                    const currentPageIndicator = document.querySelector('.rt-pagination-current, .pagination-current, .current');
+                    // 露天市集分頁檢查
+                    const nextButtons = document.querySelectorAll('.next');
+                    let hasNext = false;
                     
-                    return !!nextButton && !nextButton.classList.contains('disabled');
+                    // 檢查"下一頁"按鈕是否存在且可點擊
+                    for (const button of nextButtons) {
+                        if (button.textContent.includes('下一頁') && !button.classList.contains('disabled')) {
+                            hasNext = true;
+                            break;
+                        }
+                    }
+                    
+                    // 也檢查分頁資訊中的總頁數
+                    const paginationText = document.querySelector('.rt-pagination');
+                    if (paginationText && paginationText.textContent) {
+                        const pageMatch = paginationText.textContent.match(/第\s*(\d+)\s*\/\s*(\d+)\s*頁/);
+                        if (pageMatch) {
+                            const currentPageNum = parseInt(pageMatch[1]);
+                            const totalPages = parseInt(pageMatch[2]);
+                            console.log(`當前頁: ${currentPageNum}, 總頁數: ${totalPages}`);
+                            return currentPageNum < totalPages;
+                        }
+                    }
+                    
+                    return hasNext;
                 });
 
                 if (products.length === 0 || !hasNextPage) {

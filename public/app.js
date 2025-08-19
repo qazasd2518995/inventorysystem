@@ -746,15 +746,10 @@ async function switchStore(storeType) {
     }
 }
 
-// 更新賣場資訊顯示
+// 更新賣場資訊顯示（已移除小卡片，此函數保留但不執行任何操作）
 function updateStoreInfo(storeType) {
-    const storeInfo = document.getElementById('currentStoreInfo');
-    if (storeInfo) {
-        const storeData = getStoreData(storeType);
-        storeInfo.innerHTML = `
-            <i class="${storeData.icon}"></i> ${storeData.name} (${storeData.platform})
-        `;
-    }
+    // 小卡片已移除，不需要更新顯示
+    console.log(`切換到賣場: ${getStoreDisplayName(storeType)}`);
 }
 
 // 獲取賣場資料
