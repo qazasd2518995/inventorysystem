@@ -75,7 +75,8 @@
                         <h5 class="card-title">商品統計</h5>
                         <div class="row">
                             <div class="col-6">
-                                <p class="mb-0">總商品數：<span id="totalProducts" class="fw-bold">0</span> 件</p>
+                                <p class="mb-1">總商品數：<span id="totalProducts" class="fw-bold">0</span> 件</p>
+                                <p class="mb-0 small">圖片狀態：<span id="imageStats" class="fw-bold text-success">-</span></p>
                             </div>
                             <div class="col-6">
                                 <p class="mb-0">最後更新：<span id="updateTime" class="fw-bold">-</span></p>
@@ -106,10 +107,38 @@
         </div>
 
         <div class="row mb-3">
-            <div class="col-12">
+            <div class="col-md-8">
                 <div class="input-group">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                     <input type="text" class="form-control" id="searchInput" placeholder="搜尋商品名稱...">
+                </div>
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="collapse" data-bs-target="#updateLogsCollapse">
+                    <i class="bi bi-clock-history"></i> 更新日誌
+                </button>
+            </div>
+        </div>
+
+        <!-- 更新日誌折疊區域 -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="collapse" id="updateLogsCollapse">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="card-title mb-0">
+                                    <i class="bi bi-clock-history"></i> 更新日誌
+                                </h5>
+                                <button class="btn btn-sm btn-outline-danger" onclick="clearUpdateLogs()">
+                                    <i class="bi bi-trash"></i> 清除日誌
+                                </button>
+                            </div>
+                            <div id="updateLogsList" class="update-logs-container" style="max-height: 300px; overflow-y: auto;">
+                                <p class="text-muted text-center">暫無更新日誌</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

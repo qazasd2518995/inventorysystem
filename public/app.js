@@ -19,6 +19,7 @@ async function checkAuthStatus() {
             loadProducts();
             setupEventListeners();
             setupAutoRefresh();
+            startUpdateLogsPolling();
         } else {
             showLoginForm();
         }
@@ -391,6 +392,9 @@ function updateStatistics(data) {
         const date = new Date(data.lastUpdate);
         updateTime.textContent = date.toLocaleString('zh-TW');
     }
+    
+    // 更新圖片統計
+    updateImageStatistics(data.products || []);
 }
 
 // 更新最後更新時間
@@ -472,4 +476,115 @@ function showSuccess(message) {
     setTimeout(() => {
         successDiv.remove();
     }, 3000);
+}
+
+// 更新圖片統計
+function updateImageStatistics(products) {
+    const imageStatsElement = document.getElementById('imageStats');
+    if (!imageStatsElement) return;
+    
+    const totalProducts = products.length;
+    const productsWithImages = products.filter(p => p.imageUrl && p.imageUrl.trim() !== '').length;
+    const successRate = totalProducts > 0 ? ((productsWithImages / totalProducts) * 100).toFixed(1) : 0;
+    
+    // 根據成功率設定顏色
+    let colorClass = 'text-success';
+    if (successRate < 70) {
+        colorClass = 'text-danger';
+    } else if (successRate < 90) {
+        colorClass = 'text-warning';
+    }
+    
+    imageStatsElement.className = `fw-bold ${colorClass}`;
+    imageStatsElement.textContent = `${productsWithImages}/${totalProducts} (${successRate}%)`;
+}
+
+// 載入更新日誌
+async function loadUpdateLogs() {
+    try {
+        const response = await axios.get('/api/update-logs');
+        if (response.data.success) {
+            renderUpdateLogs(response.data.logs);
+        }
+    } catch (error) {
+        console.error('載入更新日誌失敗:', error);
+    }
+}
+
+// 渲染更新日誌
+function renderUpdateLogs(logs) {
+    const logsList = document.getElementById('updateLogsList');
+    if (!logsList) return;
+    
+    if (!logs || logs.length === 0) {
+        logsList.innerHTML = '<p class="text-muted text-center">暫無更新日誌</p>';
+        return;
+    }
+    
+    const logsHtml = logs.map(log => {
+        const timestamp = new Date(log.timestamp).toLocaleString('zh-TW', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        let detailsHtml = '';
+        if (log.details && log.details.imageStats) {
+            const stats = log.details.imageStats;
+            detailsHtml = `
+                <div class="log-details">
+                    <span class="image-stats-badge">
+                        <i class="bi bi-image"></i> ${stats.withImages}/${stats.total} 
+                        (${stats.successRate})
+                    </span>
+                    ${stats.withoutImages > 0 ? 
+                        `<span class="image-stats-badge text-warning">
+                            <i class="bi bi-exclamation-triangle"></i> ${stats.withoutImages} 無圖片
+                        </span>` : ''}
+                </div>
+            `;
+        }
+        
+        return `
+            <div class="log-entry log-${log.type}">
+                <div class="log-timestamp">${timestamp}</div>
+                <div class="log-message">${log.message}</div>
+                ${detailsHtml}
+            </div>
+        `;
+    }).join('');
+    
+    logsList.innerHTML = logsHtml;
+}
+
+// 清除更新日誌
+async function clearUpdateLogs() {
+    if (!confirm('確定要清除所有更新日誌嗎？')) {
+        return;
+    }
+    
+    try {
+        const response = await axios.post('/api/clear-logs');
+        if (response.data.success) {
+            renderUpdateLogs([]);
+            showSuccess('更新日誌已清除');
+        } else {
+            showError('清除日誌失敗');
+        }
+    } catch (error) {
+        console.error('清除日誌失敗:', error);
+        showError('清除日誌時發生錯誤');
+    }
+}
+
+// 定期載入更新日誌
+function startUpdateLogsPolling() {
+    // 初始載入
+    loadUpdateLogs();
+    
+    // 每30秒更新一次
+    setInterval(() => {
+        loadUpdateLogs();
+    }, 30000);
 }

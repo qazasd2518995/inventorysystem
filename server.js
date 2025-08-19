@@ -87,6 +87,21 @@ function addUpdateLog(type, message, details = null) {
     console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
+// 計算圖片抓取統計
+function calculateImageStats(products) {
+    const totalProducts = products.length;
+    const productsWithImages = products.filter(p => p.imageUrl && p.imageUrl.trim() !== '').length;
+    const productsWithoutImages = totalProducts - productsWithImages;
+    const imageSuccessRate = totalProducts > 0 ? ((productsWithImages / totalProducts) * 100).toFixed(1) : 0;
+    
+    return {
+        total: totalProducts,
+        withImages: productsWithImages,
+        withoutImages: productsWithoutImages,
+        successRate: imageSuccessRate
+    };
+}
+
 // 比較商品差異並記錄變更
 function compareAndLogChanges(oldProducts, newProducts) {
     const oldProductsMap = new Map(oldProducts.map(p => [p.id, p]));
@@ -153,8 +168,22 @@ function compareAndLogChanges(oldProducts, newProducts) {
     
     // 總結日誌
     if (newCount > 0 || modifiedCount > 0 || removedCount > 0) {
-        addUpdateLog('success', `商品更新完成：新增 ${newCount} 個，修改 ${modifiedCount} 個，下架 ${removedCount} 個`, {
-            summary: { newCount, modifiedCount, removedCount, totalProducts: newProducts.length }
+        // 計算圖片統計
+        const imageStats = calculateImageStats(newProducts);
+        
+        addUpdateLog('success', `商品更新完成：新增 ${newCount} 個，修改 ${modifiedCount} 個，下架 ${removedCount} 個 | 圖片：${imageStats.withImages}/${imageStats.total} (${imageStats.successRate}%)`, {
+            summary: { 
+                newCount, 
+                modifiedCount, 
+                removedCount, 
+                totalProducts: newProducts.length,
+                imageStats: {
+                    total: imageStats.total,
+                    withImages: imageStats.withImages,
+                    withoutImages: imageStats.withoutImages,
+                    successRate: `${imageStats.successRate}%`
+                }
+            }
         });
     } else {
         addUpdateLog('info', '商品檢查完成，未發現變更');
@@ -337,7 +366,16 @@ async function partialUpdateProducts(detectionResult) {
     });
     
     console.log(`部分更新完成，商品雜湊對照表已更新，共 ${productHashMap.size} 個商品`);
-    addUpdateLog('success', `部分更新完成：共 ${productsWithTime.length} 個商品`);
+    // 計算圖片統計
+    const imageStats = calculateImageStats(productsWithTime);
+    addUpdateLog('success', `部分更新完成：共 ${productsWithTime.length} 個商品 | 圖片：${imageStats.withImages}/${imageStats.total} (${imageStats.successRate}%)`, {
+        imageStats: {
+            total: imageStats.total,
+            withImages: imageStats.withImages,
+            withoutImages: imageStats.withoutImages,
+            successRate: `${imageStats.successRate}%`
+        }
+    });
     
     return productsWithTime;
 }
@@ -482,7 +520,15 @@ async function fetchYahooAuctionProductsLight(maxPages = 5) {
             addUpdateLog('info', '開始比較商品變更（輕量模式）...');
             compareAndLogChanges(productsCache, productsWithTime);
         } else {
-            addUpdateLog('success', `輕量模式抓取完成：共 ${productsWithTime.length} 個商品`);
+            const imageStats = calculateImageStats(productsWithTime);
+            addUpdateLog('success', `輕量模式抓取完成：共 ${productsWithTime.length} 個商品 | 圖片：${imageStats.withImages}/${imageStats.total} (${imageStats.successRate}%)`, {
+                imageStats: {
+                    total: imageStats.total,
+                    withImages: imageStats.withImages,
+                    withoutImages: imageStats.withoutImages,
+                    successRate: `${imageStats.successRate}%`
+                }
+            });
         }
 
         productsCache = productsWithTime;
@@ -635,7 +681,15 @@ async function fetchYahooAuctionProductsFast() {
         });
         
         lastFullScanTime = new Date();
-        addUpdateLog('success', `並行抓取完成：共 ${allProducts.length} 個商品`);
+        const imageStats = calculateImageStats(allProducts);
+        addUpdateLog('success', `並行抓取完成：共 ${allProducts.length} 個商品 | 圖片：${imageStats.withImages}/${imageStats.total} (${imageStats.successRate}%)`, {
+            imageStats: {
+                total: imageStats.total,
+                withImages: imageStats.withImages,
+                withoutImages: imageStats.withoutImages,
+                successRate: `${imageStats.successRate}%`
+            }
+        });
         console.log('已更新商品雜湊對照表，共', productHashMap.size, '個商品');
     }
     
@@ -1438,7 +1492,15 @@ async function fetchYahooAuctionProductsProgressive() {
             addUpdateLog('info', '開始比較商品變更...');
             compareAndLogChanges(productsCache, productsWithTime);
         } else {
-            addUpdateLog('success', `漸進式抓取完成：共 ${productsWithTime.length} 個商品`);
+            const imageStats = calculateImageStats(productsWithTime);
+            addUpdateLog('success', `漸進式抓取完成：共 ${productsWithTime.length} 個商品 | 圖片：${imageStats.withImages}/${imageStats.total} (${imageStats.successRate}%)`, {
+                imageStats: {
+                    total: imageStats.total,
+                    withImages: imageStats.withImages,
+                    withoutImages: imageStats.withoutImages,
+                    successRate: `${imageStats.successRate}%`
+                }
+            });
         }
 
         productsCache = productsWithTime;
@@ -1860,7 +1922,15 @@ async function fetchYahooAuctionProducts() {
             addUpdateLog('info', '開始比較商品變更...');
             compareAndLogChanges(productsCache, productsWithTime);
         } else {
-            addUpdateLog('success', `首次抓取完成：共 ${productsWithTime.length} 個商品`);
+            const imageStats = calculateImageStats(productsWithTime);
+            addUpdateLog('success', `首次抓取完成：共 ${productsWithTime.length} 個商品 | 圖片：${imageStats.withImages}/${imageStats.total} (${imageStats.successRate}%)`, {
+                imageStats: {
+                    total: imageStats.total,
+                    withImages: imageStats.withImages,
+                    withoutImages: imageStats.withoutImages,
+                    successRate: `${imageStats.successRate}%`
+                }
+            });
         }
 
         productsCache = productsWithTime;
