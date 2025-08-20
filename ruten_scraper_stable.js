@@ -43,17 +43,25 @@ async function fetchRutenProducts() {
                 console.log(`📄 正在載入第 ${currentPage} 頁...`);
                 
                 await listPage.goto(pageUrl, { 
-                    waitUntil: 'domcontentloaded',
-                    timeout: 30000 
+                    waitUntil: 'networkidle2', // 改為等待網路安靜
+                    timeout: 45000 // 增加超時時間
                 });
 
-                await new Promise(resolve => setTimeout(resolve, 1500)); // 減少頁面間延遲
+                // Render環境需要更長等待時間
+                const waitTime = process.env.NODE_ENV === 'production' ? 5000 : 2000;
+                await new Promise(resolve => setTimeout(resolve, waitTime));
 
                 const pageProducts = await listPage.evaluate(() => {
                     const productLinks = [];
                     const processedIds = new Set();
                     
+                    // 調試：檢查頁面是否正確載入
+                    if (document.readyState !== 'complete') {
+                        console.log('⚠️ 頁面還未完全載入');
+                    }
+                    
                     const linkElements = document.querySelectorAll('a[href*="/item/show?"]');
+                    console.log(`🔍 在第 ${document.querySelector('.rt-pagination')?.textContent?.match(/第\s*(\d+)/)?.[1] || '?'} 頁找到 ${linkElements.length} 個商品連結`);
                     
                     linkElements.forEach(linkElement => {
                         const href = linkElement.href;
