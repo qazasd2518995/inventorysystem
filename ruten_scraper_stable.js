@@ -164,31 +164,30 @@ async function fetchRutenProducts() {
         // 第二階段：批量處理商品詳細信息（新策略）
         console.log('💰 第二階段：批量獲取商品詳細信息...');
         
-        const batchSize = process.env.NODE_ENV === 'production' ? 30 : 20; // Render環境增加批量大小
+        const batchSize = process.env.NODE_ENV === 'production' ? 15 : 10; // 並行處理，減少批量大小避免過載
         let processedCount = 0;
         const totalProducts = uniqueProductLinks.length;
         
         for (let i = 0; i < uniqueProductLinks.length; i += batchSize) {
             const batch = uniqueProductLinks.slice(i, i + batchSize);
-            console.log(`\n🔄 處理批次 ${Math.floor(i / batchSize) + 1}/${Math.ceil(uniqueProductLinks.length / batchSize)} (${batch.length} 個商品)`);
+            console.log(`\n🚀 並行處理批次 ${Math.floor(i / batchSize) + 1}/${Math.ceil(uniqueProductLinks.length / batchSize)} (${batch.length} 個商品)`);
             
-            // 為每個批次創建新的瀏覽器頁面
-            const detailPage = await browser.newPage();
-            await detailPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-            
-            for (const productLink of batch) {
+            // 並行處理批次內的所有商品
+            const batchPromises = batch.map(async (productLink, index) => {
+                let detailPage = null;
                 try {
-                    console.log(`🔍 處理商品 ${processedCount + 1}/${totalProducts}: ${productLink.id}`);
+                    // 為每個商品創建獨立的頁面
+                    detailPage = await browser.newPage();
+                    await detailPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
                     
                     // 訪問商品詳細頁面
                     await detailPage.goto(productLink.url, { 
                         waitUntil: 'domcontentloaded',
-                        timeout: 20000 
+                        timeout: 15000 
                     });
 
-                    // 較短的等待時間
-                    // 優化：減少詳情頁載入時間
-                    const detailDelay = process.env.NODE_ENV === 'production' ? 600 : 800;
+                    // 縮短等待時間
+                    const detailDelay = process.env.NODE_ENV === 'production' ? 300 : 500;
                     await new Promise(resolve => setTimeout(resolve, detailDelay));
 
                     // 獲取商品詳細信息
@@ -244,6 +243,10 @@ async function fetchRutenProducts() {
                         return details;
                     });
 
+                    // 關閉頁面
+                    await detailPage.close();
+                    detailPage = null;
+
                     // 建立商品物件
                     const product = {
                         id: productLink.id,
@@ -254,19 +257,22 @@ async function fetchRutenProducts() {
                         store_type: 'youmao'
                     };
 
-                    scrapedProducts.push(product);
-                    
-                    const priceDisplay = product.price > 0 ? `NT$ ${product.price.toLocaleString()}` : '無價格';
-                    const nameDisplay = product.name && !product.name.startsWith('商品 ') ? '✅' : '❌';
-                    console.log(`${nameDisplay} ${product.name.slice(0, 40)}... | ${priceDisplay}`);
-
-                    processedCount++;
+                    return product;
 
                 } catch (error) {
                     console.error(`處理商品 ${productLink.id} 失敗:`, error.message);
                     
-                    // 保存基本信息
-                    const product = {
+                    // 確保頁面被關閉
+                    if (detailPage) {
+                        try {
+                            await detailPage.close();
+                        } catch (closeError) {
+                            // 忽略關閉錯誤
+                        }
+                    }
+                    
+                    // 返回基本信息
+                    return {
                         id: productLink.id,
                         name: `商品 ${productLink.id}`,
                         price: 0,
@@ -274,22 +280,33 @@ async function fetchRutenProducts() {
                         url: productLink.url,
                         store_type: 'youmao'
                     };
-                    scrapedProducts.push(product);
-                    processedCount++;
                 }
-                
-                // 商品間延遲（減少）
-                // 優化：進一步減少商品間延遲
-                const itemDelay = process.env.NODE_ENV === 'production' ? 300 : 400;
-                await new Promise(resolve => setTimeout(resolve, itemDelay));
-            }
+            });
+
+            // 等待批次內所有商品並行處理完成
+            console.log(`⏳ 等待批次內 ${batch.length} 個商品並行處理完成...`);
+            const batchResults = await Promise.allSettled(batchPromises);
             
-            // 關閉批次頁面
-            await detailPage.close();
+            // 處理結果
+            let batchSuccessCount = 0;
+            batchResults.forEach((result, index) => {
+                if (result.status === 'fulfilled' && result.value) {
+                    scrapedProducts.push(result.value);
+                    batchSuccessCount++;
+                    
+                    const product = result.value;
+                    const priceDisplay = product.price > 0 ? `NT$ ${product.price.toLocaleString()}` : '無價格';
+                    const nameDisplay = product.name && !product.name.startsWith('商品 ') ? '✅' : '❌';
+                    console.log(`${nameDisplay} ${product.name.slice(0, 40)}... | ${priceDisplay}`);
+                } else {
+                    console.error(`批次商品 ${batch[index].id} 處理失敗:`, result.reason?.message || '未知錯誤');
+                }
+            });
+            
+            processedCount += batch.length;
             
             // 批次間延遲（減少）
-            // 優化：減少批次間延遲
-            const batchDelay = process.env.NODE_ENV === 'production' ? 800 : 1000;
+            const batchDelay = process.env.NODE_ENV === 'production' ? 500 : 800;
             await new Promise(resolve => setTimeout(resolve, batchDelay));
             
             // 顯示批次進度
@@ -297,7 +314,7 @@ async function fetchRutenProducts() {
             const withName = scrapedProducts.filter(p => p.name && !p.name.startsWith('商品 ')).length;
             const priceRate = ((withPrice / processedCount) * 100).toFixed(1);
             const nameRate = ((withName / processedCount) * 100).toFixed(1);
-            console.log(`📊 批次完成 | 進度：${processedCount}/${totalProducts} | 價格成功率：${priceRate}% | 名稱成功率：${nameRate}%`);
+            console.log(`🚀 並行批次完成 | 進度：${processedCount}/${totalProducts} | 成功：${batchSuccessCount}/${batch.length} | 價格成功率：${priceRate}% | 名稱成功率：${nameRate}%`);
             
             // 每100個商品進行一次中間保存（保存所有已處理商品）
             if (processedCount > 0 && processedCount % 100 === 0) {
