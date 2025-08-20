@@ -2125,12 +2125,13 @@ app.post('/api/clear-logs', requireAuth, async (req, res) => {
     }
 });
 
-// API路由 - 智能更新商品資料（只在必要時執行爬蟲）
+// API路由 - 手動更新商品資料（強制執行爬蟲）
 app.post('/api/refresh', async (req, res) => {
     try {
-        console.log('🧠 手動觸發智能更新...');
+        console.log('🔧 手動觸發強制更新（跳過數量檢查）...');
         
-        const result = await smartUpdate({ force: false });
+        // 手動更新時使用 force: true 強制執行爬蟲
+        const result = await smartUpdate({ force: true });
         
         // 從資料庫讀取最新統計
         const yuanzhengStats = await getProductStats('yuanzhengshan');
