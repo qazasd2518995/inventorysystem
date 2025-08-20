@@ -597,7 +597,7 @@ async function fetchYahooAuctionProductsFast() {
     const maxPages = 50;
     // 根據環境調整併發度
     const isRenderEnvironment = process.env.RENDER || process.env.NODE_ENV === 'production';
-    const concurrency = isRenderEnvironment ? 2 : 3; // Render環境降低併發度，減少資源競爭
+    const concurrency = isRenderEnvironment ? 1 : 2; // 針對2GB RAM進一步降低併發度
     const updateInterval = 10; // 每10頁更新一次快取（因為並行處理更快）
 
     try {

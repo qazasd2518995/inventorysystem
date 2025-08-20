@@ -169,7 +169,7 @@ async function upsertProducts(products, storeType = 'yuanzhengshan') {
         console.log(`📝 開始批量更新 ${products.length} 個${storeType}商品到資料庫...`);
         
         const results = [];
-        const batchSize = 100; // 每次處理100個商品
+        const batchSize = 150; // 針對2GB RAM優化，增加批量大小
         
         for (let i = 0; i < products.length; i += batchSize) {
             const batch = products.slice(i, i + batchSize);

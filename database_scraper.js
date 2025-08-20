@@ -52,8 +52,9 @@ async function fetchYahooAuctionProductsWithDB() {
                 timeout: 60000 
             });
 
-            // 原始版本：等待5秒確保圖片載入
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            // 優化：根據伺服器配置調整等待時間
+            const waitTime = process.env.NODE_ENV === 'production' ? 2500 : 3000; // Render環境減少等待
+            await new Promise(resolve => setTimeout(resolve, waitTime));
             
             // 原始版本：簡單滾動邏輯
             await page.evaluate(() => {
@@ -205,7 +206,9 @@ async function fetchYahooAuctionProductsWithDB() {
                 hasMorePages = false;
             } else {
                 currentPage++;
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                // 優化：減少頁面間延遲
+                const pageDelay = process.env.NODE_ENV === 'production' ? 500 : 800;
+                await new Promise(resolve => setTimeout(resolve, pageDelay));
             }
         }
 

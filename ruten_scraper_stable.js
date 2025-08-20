@@ -23,7 +23,10 @@ async function fetchRutenProducts() {
                 '--disable-plugins',
                 '--disable-images', // 不載入圖片以節省資源
                 '--disable-javascript', // 禁用JavaScript以提高穩定性
-                '--max-old-space-size=2048'
+                '--max-old-space-size=1024', // 針對2GB RAM優化
+                '--memory-pressure-off', // 關閉內存壓力檢測
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding'
             ]
         });
 
@@ -47,8 +50,8 @@ async function fetchRutenProducts() {
                     timeout: 45000 // 增加超時時間
                 });
 
-                // Render環境需要更長等待時間
-                const waitTime = process.env.NODE_ENV === 'production' ? 5000 : 2000;
+                // 優化：針對2GB RAM環境調整等待時間
+                const waitTime = process.env.NODE_ENV === 'production' ? 3000 : 2000; // 減少Render等待時間
                 await new Promise(resolve => setTimeout(resolve, waitTime));
 
                 const pageProducts = await listPage.evaluate(() => {
@@ -135,7 +138,9 @@ async function fetchRutenProducts() {
                 }
 
                 currentPage++;
-                await new Promise(resolve => setTimeout(resolve, 1000)); // 減少翻頁延遲
+                // 優化：進一步減少翻頁延遲
+                const pageDelay = process.env.NODE_ENV === 'production' ? 600 : 800;
+                await new Promise(resolve => setTimeout(resolve, pageDelay));
                 
             } catch (error) {
                 console.error(`第 ${currentPage} 頁收集連結時發生錯誤:`, error.message);
@@ -158,7 +163,7 @@ async function fetchRutenProducts() {
         // 第二階段：批量處理商品詳細信息（新策略）
         console.log('💰 第二階段：批量獲取商品詳細信息...');
         
-        const batchSize = 20; // 每批處理20個商品（加快抓取速度）
+        const batchSize = process.env.NODE_ENV === 'production' ? 30 : 20; // Render環境增加批量大小
         let processedCount = 0;
         const totalProducts = uniqueProductLinks.length;
         
@@ -181,7 +186,9 @@ async function fetchRutenProducts() {
                     });
 
                     // 較短的等待時間
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // 加快詳情頁載入
+                    // 優化：減少詳情頁載入時間
+                    const detailDelay = process.env.NODE_ENV === 'production' ? 600 : 800;
+                    await new Promise(resolve => setTimeout(resolve, detailDelay));
 
                     // 獲取商品詳細信息
                     const productDetails = await detailPage.evaluate(() => {
@@ -271,14 +278,18 @@ async function fetchRutenProducts() {
                 }
                 
                 // 商品間延遲（減少）
-                await new Promise(resolve => setTimeout(resolve, 500)); // 加快商品處理速度
+                // 優化：進一步減少商品間延遲
+                const itemDelay = process.env.NODE_ENV === 'production' ? 300 : 400;
+                await new Promise(resolve => setTimeout(resolve, itemDelay));
             }
             
             // 關閉批次頁面
             await detailPage.close();
             
             // 批次間延遲（減少）
-            await new Promise(resolve => setTimeout(resolve, 1500)); // 加快批次處理速度
+            // 優化：減少批次間延遲
+            const batchDelay = process.env.NODE_ENV === 'production' ? 800 : 1000;
+            await new Promise(resolve => setTimeout(resolve, batchDelay));
             
             // 顯示批次進度
             const withPrice = scrapedProducts.filter(p => p.price > 0).length;
