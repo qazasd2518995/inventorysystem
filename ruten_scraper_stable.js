@@ -315,7 +315,6 @@ async function fetchRutenProducts() {
                     url: productLink.url,
                     store_type: 'youmao'
                 };
-                }
             });
 
             // 等待批次內所有商品並行處理完成
