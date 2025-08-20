@@ -2278,11 +2278,10 @@ app.get('/api/export', requireAuth, async (req, res) => {
         const createWorksheet = (workbook, storeName) => {
             const worksheet = workbook.addWorksheet(storeName);
             
-            // 設定欄位
+            // 設定欄位（移除商品編號）
             worksheet.columns = [
-                { header: '商品編號', key: 'id', width: 15 },
-                { header: '商品名稱', key: 'name', width: 40 },
-                { header: '價格', key: 'price', width: 12 },
+                { header: '商品名稱', key: 'name', width: 50 },
+                { header: '價格', key: 'price', width: 15 },
                 { header: '圖片連結', key: 'image', width: 20 },
                 { header: '商品連結', key: 'link', width: 20 },
                 { header: '更新時間', key: 'updateTime', width: 18 }
@@ -2307,9 +2306,8 @@ app.get('/api/export', requireAuth, async (req, res) => {
             products.forEach((product, index) => {
                 const rowIndex = index + 2; // 從第2列開始（第1列是標題）
                 
-                // 加入基本資料
+                // 加入基本資料（移除商品編號）
                 worksheet.addRow({
-                    id: product.id,
                     name: product.name,
                     price: `NT$ ${product.price.toLocaleString()}`,
                     image: '點擊查看圖片',
@@ -2317,8 +2315,8 @@ app.get('/api/export', requireAuth, async (req, res) => {
                     updateTime: new Date(product.updatedAt || new Date()).toLocaleString('zh-TW')
                 });
                 
-                // 為圖片網址建立超連結
-                const imageCell = worksheet.getCell(rowIndex, 4);
+                // 為圖片網址建立超連結（調整欄位索引）
+                const imageCell = worksheet.getCell(rowIndex, 3);
                 if (product.imageUrl && !product.imageUrl.includes('item-no-image.svg')) {
                     imageCell.value = {
                         text: '🖼️ 點擊查看圖片',
@@ -2333,8 +2331,8 @@ app.get('/api/export', requireAuth, async (req, res) => {
                     imageCell.font = { color: { argb: 'FF999999' } };
                 }
                 
-                // 為商品連結建立超連結
-                const linkCell = worksheet.getCell(rowIndex, 5);
+                // 為商品連結建立超連結（調整欄位索引）
+                const linkCell = worksheet.getCell(rowIndex, 4);
                 if (product.url) {
                     linkCell.value = {
                         text: '🔗 點擊查看商品',
@@ -2352,8 +2350,8 @@ app.get('/api/export', requireAuth, async (req, res) => {
                 worksheet.getRow(rowIndex).height = 20;
             });
             
-            // 自動調整欄寬
-            [1, 2, 6].forEach(colIndex => {
+            // 自動調整欄寬（調整欄位索引，移除商品編號後）
+            [1, 2, 5].forEach(colIndex => {
                 const column = worksheet.getColumn(colIndex);
                 let maxLength = 0;
                 column.eachCell({ includeEmpty: true }, (cell) => {

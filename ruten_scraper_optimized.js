@@ -1,8 +1,8 @@
-// 友茂（露天市集）商品爬蟲 - 優化版本
+// 友茂（露天市集）商品爬蟲 - 優化版本（仿源正山風格）
 const puppeteer = require('puppeteer');
 const { upsertProducts, compareAndUpdateProducts } = require('./database');
 
-async function fetchRutenProducts() {
+async function fetchRutenProductsOptimized() {
     let browser = null;
     let allProducts = [];
     
@@ -30,7 +30,7 @@ async function fetchRutenProducts() {
         await page.setViewport({ width: 1920, height: 1080 });
 
         let currentPage = 1;
-        const maxPages = parseInt(process.env.MAX_PAGES) || 50; // 預設50頁以確保抓取所有商品
+        const maxPages = parseInt(process.env.MAX_PAGES) || 45;
         let hasMorePages = true;
 
         while (hasMorePages && currentPage <= maxPages) {
@@ -379,5 +379,5 @@ async function fetchRutenProducts() {
 }
 
 module.exports = {
-    fetchRutenProducts
+    fetchRutenProductsOptimized
 };

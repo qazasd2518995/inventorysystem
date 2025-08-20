@@ -260,7 +260,7 @@ function displayProducts(products) {
                      alt="${product.name}" 
                      class="product-img-mobile"
                      onerror="this.src='https://via.placeholder.com/100'"
-                     onclick="showProductDetail('${product.id}')">
+                     onclick='showProductDetail(${JSON.stringify(product).replace(/'/g, "&#39;")})'>
             </td>
             <td class="price-tag-mobile">NT$ ${product.price.toLocaleString()}</td>
             <td>
@@ -269,14 +269,13 @@ function displayProducts(products) {
                 </div>
             </td>
             <td>
-                <button class="btn btn-sm btn-outline-primary me-1" onclick="showProductDetail('${product.id}')">
+                <button class="btn btn-sm btn-outline-primary me-1" onclick='showProductDetail(${JSON.stringify(product).replace(/'/g, "&#39;")})'>  
                     <i class="bi bi-eye"></i>
                 </button>
                 <a href="${product.url}" target="_blank" class="btn btn-sm btn-outline-secondary">
                     <i class="bi bi-box-arrow-up-right"></i>
                 </a>
             </td>
-            <td class="d-none">${product.id}</td>
         `;
         
         tbody.appendChild(row);
@@ -291,8 +290,7 @@ function filterProducts(searchTerm) {
         filteredProducts = allProducts;
     } else {
         filteredProducts = allProducts.filter(product => 
-            product.name.toLowerCase().includes(searchTerm) ||
-            product.id.toLowerCase().includes(searchTerm)
+            product.name.toLowerCase().includes(searchTerm)
         );
     }
     
@@ -300,15 +298,17 @@ function filterProducts(searchTerm) {
 }
 
 // 顯示商品詳情
-function showProductDetail(productId) {
-    const product = allProducts.find(p => p.id === productId);
-    
+function showProductDetail(product) {
     if (!product) return;
     
     // 更新 Modal 內容
     document.getElementById('modalImage').src = product.imageUrl || 'https://via.placeholder.com/400';
     document.getElementById('modalTitle').textContent = product.name;
-    document.getElementById('modalId').textContent = product.id;
+    // 移除商品編號顯示
+    const modalIdElement = document.getElementById('modalId');
+    if (modalIdElement) {
+        modalIdElement.parentElement.style.display = 'none';
+    }
     document.getElementById('modalPrice').textContent = product.price.toLocaleString();
     document.getElementById('modalLink').href = product.url;
     
