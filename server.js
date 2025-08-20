@@ -1790,9 +1790,10 @@ app.get('/api/products', requireAuth, async (req, res) => {
             
             console.log(`✅ 從資料庫讀取到 ${products.length} 個友茂商品`);
             
-            // 如果友茂資料庫沒有資料，觸發初始化抓取
-            if (products.length === 0) {
-                console.log('⚠️ 友茂資料庫無資料，觸發初始化抓取...');
+            // 如果友茂資料庫商品不足，觸發初始化抓取
+            const expectedMinProducts = 1000; // 友茂預期至少有1000個商品
+            if (products.length < expectedMinProducts) {
+                console.log(`⚠️ 友茂商品數量不足：${products.length}/${expectedMinProducts}，觸發完整抓取...`);
                 try {
                     const { fetchRutenProducts } = require('./ruten_scraper_stable');
                     await fetchRutenProducts();
@@ -2471,9 +2472,11 @@ setInterval(async () => {
             // 檢查友茂商品是否需要初始化（避免重複）
             try {
                 const youmaoProducts = await getActiveProducts('youmao');
-                if (youmaoProducts.length === 0) {
-                    console.log('⚠️ 定時檢查發現友茂資料庫無資料，開始初始化抓取...');
-                    addUpdateLog('info', '定時檢查發現友茂資料庫無資料，開始初始化抓取...');
+                const expectedMinProducts = 1000; // 友茂預期至少有1000個商品
+                
+                if (youmaoProducts.length < expectedMinProducts) {
+                    console.log(`⚠️ 定時檢查發現友茂商品不足：${youmaoProducts.length}/${expectedMinProducts}，開始完整抓取...`);
+                    addUpdateLog('info', `定時檢查發現友茂商品不足：${youmaoProducts.length}/${expectedMinProducts}，開始完整抓取...`);
                     const { fetchRutenProducts } = require('./ruten_scraper_stable');
                     await fetchRutenProducts();
                     addUpdateLog('success', '友茂商品定時初始化完成');
@@ -2508,19 +2511,21 @@ setTimeout(async () => {
             addUpdateLog('success', '源正山商品抓取完成');
             console.log('[SUCCESS] 源正山商品抓取完成');
             
-            // 檢查友茂商品是否需要初始化
+            // 檢查友茂商品是否需要初始化（少於1000個視為不完整）
             try {
                 const youmaoProducts = await getActiveProducts('youmao');
-                if (youmaoProducts.length === 0) {
-                    console.log('⚠️ 友茂資料庫無資料，開始初始化抓取...');
-                    addUpdateLog('info', '友茂資料庫無資料，開始初始化抓取...');
+                const expectedMinProducts = 1000; // 友茂預期至少有1000個商品
+                
+                if (youmaoProducts.length < expectedMinProducts) {
+                    console.log(`⚠️ 友茂商品數量不足：${youmaoProducts.length}/${expectedMinProducts}，開始完整抓取...`);
+                    addUpdateLog('info', `友茂商品數量不足：${youmaoProducts.length}/${expectedMinProducts}，開始完整抓取...`);
                     const { fetchRutenProducts } = require('./ruten_scraper_stable');
                     await fetchRutenProducts();
                     addUpdateLog('success', '友茂商品抓取完成');
                     console.log('[SUCCESS] 友茂商品抓取完成');
                 } else {
-                    console.log(`✅ 友茂商品已存在：${youmaoProducts.length} 個`);
-                    addUpdateLog('info', `友茂商品已存在：${youmaoProducts.length} 個`);
+                    console.log(`✅ 友茂商品已完整：${youmaoProducts.length} 個`);
+                    addUpdateLog('info', `友茂商品已完整：${youmaoProducts.length} 個`);
                 }
             } catch (youmaoError) {
                 console.error('[ERROR] 友茂初始化失敗:', youmaoError.message);
