@@ -124,11 +124,19 @@ async function logout() {
 
 // 設定事件監聽器
 function setupEventListeners() {
-    // 搜尋功能
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.addEventListener('input', function(e) {
-            filterProducts(e.target.value);
+    // 品名搜尋功能
+    const searchNameInput = document.getElementById('searchNameInput');
+    if (searchNameInput) {
+        searchNameInput.addEventListener('input', function(e) {
+            performSearch();
+        });
+    }
+    
+    // 價格搜尋功能
+    const searchPriceInput = document.getElementById('searchPriceInput');
+    if (searchPriceInput) {
+        searchPriceInput.addEventListener('input', function(e) {
+            performSearch();
         });
     }
 
@@ -283,18 +291,19 @@ function displayProducts(products) {
 }
 
 // 篩選商品
+// 執行搜尋 (結合品名和價格)
+function performSearch() {
+    searchProducts();
+}
+
+// 保留舊的 filterProducts 函數以確保相容性
 function filterProducts(searchTerm) {
-    searchTerm = searchTerm.toLowerCase().trim();
-    
-    if (!searchTerm) {
-        filteredProducts = allProducts;
-    } else {
-        filteredProducts = allProducts.filter(product => 
-            product.name.toLowerCase().includes(searchTerm)
-        );
+    // 清空搜尋欄位並執行新的搜尋
+    if (document.getElementById('searchNameInput')) {
+        document.getElementById('searchNameInput').value = searchTerm;
+        document.getElementById('searchPriceInput').value = '';
+        searchProducts();
     }
-    
-    displayProducts(filteredProducts);
 }
 
 // 顯示商品詳情
@@ -587,62 +596,44 @@ function startUpdateLogsPolling() {
 
 // 搜尋功能
 function searchProducts(searchTerm) {
-    if (!searchTerm.trim()) {
-        // 如果搜尋框為空，顯示所有商品
+    // 如果有傳入 searchTerm，代表是舊的呼叫方式
+    if (typeof searchTerm === 'string') {
+        // 轉換為新的搜尋方式
+        if (document.getElementById('searchNameInput')) {
+            document.getElementById('searchNameInput').value = searchTerm;
+            document.getElementById('searchPriceInput').value = '';
+        }
+    }
+    
+    const nameSearchTerm = document.getElementById('searchNameInput')?.value.toLowerCase().trim() || '';
+    const priceSearchTerm = document.getElementById('searchPriceInput')?.value.trim() || '';
+    
+    if (!nameSearchTerm && !priceSearchTerm) {
+        // 如果都沒有輸入，顯示所有商品
         filteredProducts = allProducts;
     } else {
-        const term = searchTerm.toLowerCase().trim();
         
         filteredProducts = allProducts.filter(product => {
-            // 搜尋商品名稱
-            const nameMatch = product.name.toLowerCase().includes(term);
+            // 品名搜尋
+            const nameMatch = !nameSearchTerm || product.name.toLowerCase().includes(nameSearchTerm);
             
-            // 檢查是否為範圍搜索
-            let isRangeSearch = false;
-            let rangeMatch = false;
-            
-            // 搜尋價格範圍（例如：輸入 "1000-5000" 或 ">2000" 或 "<1000"）
-            if (term.includes('-')) {
-                isRangeSearch = true;
-                const [min, max] = term.split('-').map(n => parseInt(n.replace(/[^\d]/g, '')));
-                if (!isNaN(min) && !isNaN(max)) {
-                    rangeMatch = product.price >= min && product.price <= max;
-                }
-            } else if (term.startsWith('>')) {
-                isRangeSearch = true;
-                const minPrice = parseInt(term.substring(1).replace(/[^\d]/g, ''));
-                if (!isNaN(minPrice)) {
-                    rangeMatch = product.price > minPrice;
-                }
-            } else if (term.startsWith('<')) {
-                isRangeSearch = true;
-                const maxPrice = parseInt(term.substring(1).replace(/[^\d]/g, ''));
-                if (!isNaN(maxPrice)) {
-                    rangeMatch = product.price < maxPrice;
+            // 價格搜尋
+            let priceMatch = true;
+            if (priceSearchTerm) {
+                // 移除使用者輸入的逗號，只保留數字
+                const cleanPriceInput = priceSearchTerm.replace(/,/g, '');
+                const searchPrice = parseInt(cleanPriceInput);
+                
+                if (!isNaN(searchPrice)) {
+                    // 精確匹配價格
+                    priceMatch = product.price === searchPrice;
+                } else {
+                    priceMatch = false;
                 }
             }
             
-            // 如果是範圍搜索，只檢查名稱匹配和範圍匹配
-            if (isRangeSearch) {
-                return nameMatch || rangeMatch;
-            }
-            
-            // 普通價格搜尋（支援多種格式，自動處理逗號）
-            const priceValue = product.price;
-            const priceText = priceValue.toString(); // 純數字，如：4200
-            const priceWithComma = priceValue.toLocaleString(); // 帶逗號，如：4,200
-            const cleanTerm = term.replace(/,/g, ''); // 移除搜索詞中的逗號
-            
-            // 檢查各種匹配情況：
-            // 1. 直接數字匹配：輸入4200 找到 4200
-            // 2. 帶逗號匹配：輸入4,200 找到 4,200  
-            // 3. 交叉匹配：輸入4200 找到 4,200 或 輸入4,200 找到 4200
-            const priceMatch = priceText.includes(cleanTerm) || 
-                              priceWithComma.includes(term) ||
-                              priceText === cleanTerm ||
-                              priceWithComma.replace(/,/g, '') === cleanTerm;
-            
-            return nameMatch || priceMatch;
+            // 必須同時符合品名和價格條件
+            return nameMatch && priceMatch;
         });
     }
     
@@ -650,7 +641,8 @@ function searchProducts(searchTerm) {
     displayProducts(filteredProducts);
     
     // 更新搜尋結果提示
-    updateSearchResultsInfo(searchTerm, filteredProducts.length, allProducts.length);
+    const displayTerm = nameSearchTerm || priceSearchTerm || '';
+    updateSearchResultsInfo(displayTerm, filteredProducts.length, allProducts.length);
 }
 
 // 更新搜尋結果資訊
@@ -681,17 +673,35 @@ function updateSearchResultsInfo(searchTerm, resultCount, totalCount) {
 
 // 初始化搜尋功能
 function initializeSearch() {
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
+    const searchNameInput = document.getElementById('searchNameInput');
+    const searchPriceInput = document.getElementById('searchPriceInput');
+    
+    // 品名搜尋
+    if (searchNameInput) {
         // 即時搜尋（輸入時立即搜尋）
-        searchInput.addEventListener('input', function(e) {
-            searchProducts(e.target.value);
+        searchNameInput.addEventListener('input', function(e) {
+            searchProducts();
         });
         
         // 按Enter鍵搜尋
-        searchInput.addEventListener('keypress', function(e) {
+        searchNameInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
-                searchProducts(e.target.value);
+                searchProducts();
+            }
+        });
+    }
+    
+    // 價格搜尋
+    if (searchPriceInput) {
+        // 即時搜尋（輸入時立即搜尋）
+        searchPriceInput.addEventListener('input', function(e) {
+            searchProducts();
+        });
+        
+        // 按Enter鍵搜尋
+        searchPriceInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchProducts();
             }
         });
     }
@@ -725,9 +735,13 @@ async function switchStore(storeType) {
     displayProducts([]);
     
     // 清空搜尋框
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.value = '';
+    const searchNameInput = document.getElementById('searchNameInput');
+    const searchPriceInput = document.getElementById('searchPriceInput');
+    if (searchNameInput) {
+        searchNameInput.value = '';
+    }
+    if (searchPriceInput) {
+        searchPriceInput.value = '';
     }
     
     // 隱藏搜尋結果提示
