@@ -12,9 +12,10 @@ async function fetchRutenProducts() {
         const storeUrl = 'https://www.ruten.com.tw/store/u-mo0955900924/';
         console.log(`📍 目標賣場: ${storeUrl}`);
 
-        // 啟動瀏覽器 - 使用更保守的設定
+        // 啟動瀏覽器 - 使用更保守的設定並增加超時時間
         browser = await puppeteer.launch({
             headless: true,
+            protocolTimeout: 120000, // 增加協議超時到2分鐘
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -298,12 +299,12 @@ async function fetchRutenProducts() {
             const nameRate = ((withName / processedCount) * 100).toFixed(1);
             console.log(`📊 批次完成 | 進度：${processedCount}/${totalProducts} | 價格成功率：${priceRate}% | 名稱成功率：${nameRate}%`);
             
-            // 每100個商品進行一次中間保存
+            // 每100個商品進行一次中間保存（保存所有已處理商品）
             if (processedCount > 0 && processedCount % 100 === 0) {
                 console.log(`💾 中間保存：已處理 ${processedCount} 個商品，保存到資料庫...`);
                 try {
-                    await upsertProducts(scrapedProducts.slice(-100), 'youmao'); // 只保存最近100個
-                    console.log(`✅ 中間保存成功`);
+                    await upsertProducts(scrapedProducts, 'youmao'); // 保存所有已處理商品
+                    console.log(`✅ 中間保存成功：${scrapedProducts.length} 個商品`);
                 } catch (error) {
                     console.error(`❌ 中間保存失敗:`, error.message);
                 }
@@ -345,10 +346,23 @@ async function fetchRutenProducts() {
 
     } catch (error) {
         console.error('友茂商品抓取失敗:', error);
+        
+        // 即使失敗，也嘗試保存已處理的商品
+        if (scrapedProducts.length > 0) {
+            console.log(`⚠️ 抓取中斷，嘗試保存已處理的 ${scrapedProducts.length} 個商品...`);
+            try {
+                await upsertProducts(scrapedProducts, 'youmao');
+                console.log(`✅ 已保存 ${scrapedProducts.length} 個商品到資料庫`);
+            } catch (saveError) {
+                console.error('❌ 保存已處理商品失敗:', saveError.message);
+            }
+        }
+        
         return {
             success: false,
             error: error.message,
-            totalProducts: scrapedProducts.length
+            totalProducts: scrapedProducts.length,
+            savedProducts: scrapedProducts.length
         };
     } finally {
         if (browser) {
