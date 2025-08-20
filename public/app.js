@@ -200,42 +200,32 @@ async function loadProducts() {
     }
 }
 
-// 重新整理商品資料（只針對當前選中的賣場）
+// 智能更新商品資料（只在必要時執行爬蟲）
 async function refreshProducts() {
     const refreshBtn = event.target;
     refreshBtn.disabled = true;
-    refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>更新中...';
+    refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>智能檢查中...';
     
     try {
-        // 根據當前選中的賣場決定API端點
-        let apiEndpoint;
-        let storeName;
-        
-        if (currentStore === 'youmao') {
-            apiEndpoint = '/api/refresh-youmao';
-            storeName = '友茂';
-        } else {
-            apiEndpoint = '/api/refresh-yuanzhengshan';
-            storeName = '源正山';
-        }
-        
-        const response = await axios.post(apiEndpoint);
+        // 使用智能更新端點
+        const response = await axios.post('/api/refresh');
         
         if (response.data.success) {
             // 重新載入當前賣場的商品資料
             await loadProducts();
             
-            // 顯示成功訊息
-            showSuccess(`${storeName}商品資料已更新`);
+            // 根據智能更新的結果顯示相應訊息
+            const message = response.data.message || '智能更新完成';
+            showSuccess(message);
         } else {
-            showError(`更新${storeName}商品資料失敗`);
+            showError(`智能更新失敗: ${response.data.error || '未知錯誤'}`);
         }
     } catch (error) {
-        console.error('更新商品時發生錯誤:', error);
-        showError('無法更新商品資料，請稍後再試');
+        console.error('智能更新時發生錯誤:', error);
+        showError('無法執行智能更新，請稍後再試');
     } finally {
         refreshBtn.disabled = false;
-        refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 重新整理';
+        refreshBtn.innerHTML = '<i class="bi bi-brain"></i> 智能更新';
     }
 }
 

@@ -29,6 +29,9 @@ const {
 // 引入資料庫爬蟲
 const { fetchYahooAuctionProductsWithDB } = require('./database_scraper');
 
+// 引入智能爬蟲管理器
+const { smartUpdate, initializationCheck } = require('./smart_scraper');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -2122,42 +2125,21 @@ app.post('/api/clear-logs', requireAuth, async (req, res) => {
     }
 });
 
-// API路由 - 強制更新所有商品資料（源正山 + 友茂）
+// API路由 - 智能更新商品資料（只在必要時執行爬蟲）
 app.post('/api/refresh', async (req, res) => {
     try {
-        console.log('手動觸發完整更新（源正山 + 友茂）...');
-        addUpdateLog('info', '手動觸發完整更新（源正山 + 友茂）...');
+        console.log('🧠 手動觸發智能更新...');
         
-        // 更新源正山商品
-        console.log('🔄 開始源正山手動更新...');
-        addUpdateLog('info', '開始源正山手動更新...');
-        await fetchYahooAuctionProducts();
-        addUpdateLog('success', '源正山手動更新完成');
-        console.log('[SUCCESS] 源正山手動更新完成');
-        
-        // 更新友茂商品
-        try {
-            console.log('🔄 開始友茂手動更新...');
-            addUpdateLog('info', '開始友茂手動更新...');
-            const { fetchRutenProducts } = require('./ruten_scraper_stable');
-            await fetchRutenProducts();
-            addUpdateLog('success', '友茂手動更新完成');
-            console.log('[SUCCESS] 友茂手動更新完成');
-        } catch (youmaoError) {
-            console.error('[ERROR] 友茂手動更新失敗:', youmaoError.message);
-            addUpdateLog('error', `友茂手動更新失敗: ${youmaoError.message}`);
-        }
+        const result = await smartUpdate({ force: false });
         
         // 從資料庫讀取最新統計
         const yuanzhengStats = await getProductStats('yuanzhengshan');
         const youmaoStats = await getProductStats('youmao');
         
-        addUpdateLog('success', '手動完整更新完成');
-        console.log('[SUCCESS] 手動完整更新完成');
-        
         res.json({
             success: true,
-            message: `完整更新完成`,
+            message: result.summary,
+            result: result,
             yuanzhengshan: {
                 total: yuanzhengStats.total,
                 lastUpdate: yuanzhengStats.lastUpdate,
@@ -2178,8 +2160,7 @@ app.post('/api/refresh', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('手動完整更新錯誤:', error);
-        addUpdateLog('error', `手動完整更新失敗: ${error.message}`);
+        console.error('智能更新錯誤:', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -2527,41 +2508,36 @@ setInterval(async () => {
     }
 }, 24 * 60 * 60 * 1000); // 24小時 (1天)
 
-// 啟動時立即執行完整抓取
+// 智能初始化檢查 - 只在必要時執行爬蟲
 setTimeout(async () => {
     if (!isUpdating) {
-        console.log('啟動初始化，開始完整抓取商品資料...');
+        console.log('🧠 伺服器啟動：執行智能初始化檢查...');
         isUpdating = true;
         try {
             // 先載入測試資料讓系統可用
             productsCache = generateTestData();
             lastUpdateTime = new Date();
-            addUpdateLog('info', '系統啟動，載入測試資料，開始完整抓取...');
             
-            // 立即執行源正山完整抓取
-            await fetchYahooAuctionProducts();
-            addUpdateLog('success', '源正山商品抓取完成');
-            console.log('[SUCCESS] 源正山商品抓取完成');
+            const initResult = await initializationCheck();
             
-            // 伺服器初始化時，友茂商品也進行完整抓取（不管資料庫數量）
-            try {
-                console.log('🔄 開始友茂商品完整抓取（伺服器初始化）...');
-                addUpdateLog('info', '開始友茂商品完整抓取（伺服器初始化）...');
-                const { fetchRutenProducts } = require('./ruten_scraper_stable');
-                await fetchRutenProducts();
-                addUpdateLog('success', '友茂商品抓取完成');
-                console.log('[SUCCESS] 友茂商品抓取完成');
-            } catch (youmaoError) {
-                console.error('[ERROR] 友茂初始化失敗:', youmaoError.message);
-                addUpdateLog('error', `友茂初始化失敗: ${youmaoError.message}`);
+            if (!initResult.initialized) {
+                if (initResult.reason === 'database_has_data') {
+                    console.log('✅ 資料庫已有資料，跳過初始化爬蟲');
+                    addUpdateLog('info', '系統啟動：資料庫已有資料，無需初始化');
+                } else {
+                    console.log('⚠️ 初始化檢查失敗，但系統可正常運行');
+                    addUpdateLog('warning', `初始化檢查失敗: ${initResult.error || '未知錯誤'}`);
+                }
+            } else {
+                console.log('🎉 初始化完成，資料庫已更新');
+                addUpdateLog('success', '系統啟動：初始化完成，商品資料已更新');
             }
             
-            addUpdateLog('success', '系統啟動完成，商品資料抓取完畢');
-            console.log('系統初始化完成，商品資料已更新');
+            console.log('✅ 系統初始化完成，伺服器就緒');
         } catch (error) {
-            console.error('初始化抓取失敗:', error);
-            addUpdateLog('error', `初始化抓取失敗: ${error.message}`);
-            // 保持測試資料
+            console.error('❌ 智能初始化失敗:', error.message);
+            addUpdateLog('error', `智能初始化失敗: ${error.message}`);
+            // 保持測試資料，系統仍可運行
         } finally {
             isUpdating = false;
         }

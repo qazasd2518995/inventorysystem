@@ -246,31 +246,76 @@ async function getActiveProducts(storeType = 'yuanzhengshan', limit = null, offs
 }
 
 // 獲取商品統計
-async function getProductStats(storeType = 'yuanzhengshan') {
+async function getProductStats(storeType = null) {
     const client = await pool.connect();
     
     try {
-        const result = await client.query(`
-            SELECT 
-                COUNT(*) as total,
-                COUNT(CASE WHEN image_url IS NOT NULL AND image_url != '' THEN 1 END) as with_images,
-                COUNT(CASE WHEN image_url IS NULL OR image_url = '' THEN 1 END) as without_images,
-                MAX(updated_at) as last_update
-            FROM products 
-            WHERE is_active = TRUE AND store_type = $1
-        `, [storeType]);
-        
-        const stats = result.rows[0];
-        const imageSuccessRate = stats.total > 0 ? 
-            ((parseInt(stats.with_images) / parseInt(stats.total)) * 100).toFixed(1) : 0;
-        
-        return {
-            total: parseInt(stats.total),
-            withImages: parseInt(stats.with_images),
-            withoutImages: parseInt(stats.without_images),
-            imageSuccessRate: `${imageSuccessRate}%`,
-            lastUpdate: stats.last_update
-        };
+        if (storeType) {
+            // 單一商店統計
+            const result = await client.query(`
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(CASE WHEN image_url IS NOT NULL AND image_url != '' THEN 1 END) as with_images,
+                    COUNT(CASE WHEN image_url IS NULL OR image_url = '' THEN 1 END) as without_images,
+                    MAX(updated_at) as last_update
+                FROM products 
+                WHERE is_active = TRUE AND store_type = $1
+            `, [storeType]);
+            
+            const stats = result.rows[0];
+            const imageSuccessRate = stats.total > 0 ? 
+                ((parseInt(stats.with_images) / parseInt(stats.total)) * 100).toFixed(1) : 0;
+            
+            return {
+                total: parseInt(stats.total),
+                withImages: parseInt(stats.with_images),
+                withoutImages: parseInt(stats.without_images),
+                imageSuccessRate: `${imageSuccessRate}%`,
+                lastUpdate: stats.last_update
+            };
+        } else {
+            // 所有商店統計
+            const result = await client.query(`
+                SELECT 
+                    store_type,
+                    COUNT(*) as total,
+                    COUNT(CASE WHEN image_url IS NOT NULL AND image_url != '' THEN 1 END) as with_images,
+                    COUNT(CASE WHEN image_url IS NULL OR image_url = '' THEN 1 END) as without_images,
+                    MAX(updated_at) as last_update
+                FROM products 
+                WHERE is_active = TRUE 
+                GROUP BY store_type
+            `);
+            
+            const stats = {
+                total: 0,
+                yuanzhengshan: 0,
+                youmao: 0,
+                withImages: 0,
+                withoutImages: 0,
+                lastUpdate: null
+            };
+            
+            result.rows.forEach(row => {
+                const storeTotal = parseInt(row.total);
+                const storeWithImages = parseInt(row.with_images);
+                
+                stats.total += storeTotal;
+                stats.withImages += storeWithImages;
+                stats.withoutImages += parseInt(row.without_images);
+                stats[row.store_type] = storeTotal;
+                
+                if (!stats.lastUpdate || (row.last_update && row.last_update > stats.lastUpdate)) {
+                    stats.lastUpdate = row.last_update;
+                }
+            });
+            
+            const imageSuccessRate = stats.total > 0 ? 
+                ((stats.withImages / stats.total) * 100).toFixed(1) : 0;
+            stats.imageSuccessRate = `${imageSuccessRate}%`;
+            
+            return stats;
+        }
         
     } finally {
         client.release();
