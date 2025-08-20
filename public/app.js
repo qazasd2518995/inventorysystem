@@ -154,7 +154,7 @@ function setupAutoRefresh() {
         if (autoRefreshInterval) {
             clearInterval(autoRefreshInterval);
         }
-        // 設定每5分鐘更新一次
+        // 設定每5分鐘檢查更新一次（實際自動更新由服務器每24小時執行）
         autoRefreshInterval = setInterval(() => {
             loadProducts();
         }, 5 * 60 * 1000);

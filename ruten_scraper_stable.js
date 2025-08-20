@@ -47,7 +47,7 @@ async function fetchRutenProducts() {
                     timeout: 30000 
                 });
 
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                await new Promise(resolve => setTimeout(resolve, 1500)); // 減少頁面間延遲
 
                 const pageProducts = await listPage.evaluate(() => {
                     const productLinks = [];
@@ -127,7 +127,7 @@ async function fetchRutenProducts() {
                 }
 
                 currentPage++;
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await new Promise(resolve => setTimeout(resolve, 1000)); // 減少翻頁延遲
                 
             } catch (error) {
                 console.error(`第 ${currentPage} 頁收集連結時發生錯誤:`, error.message);
@@ -150,7 +150,7 @@ async function fetchRutenProducts() {
         // 第二階段：批量處理商品詳細信息（新策略）
         console.log('💰 第二階段：批量獲取商品詳細信息...');
         
-        const batchSize = 10; // 每批處理10個商品（為全量抓取優化）
+        const batchSize = 20; // 每批處理20個商品（加快抓取速度）
         let processedCount = 0;
         const totalProducts = uniqueProductLinks.length;
         
@@ -173,7 +173,7 @@ async function fetchRutenProducts() {
                     });
 
                     // 較短的等待時間
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // 加快詳情頁載入
 
                     // 獲取商品詳細信息
                     const productDetails = await detailPage.evaluate(() => {
@@ -262,15 +262,15 @@ async function fetchRutenProducts() {
                     processedCount++;
                 }
                 
-                // 商品間延遲
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                // 商品間延遲（減少）
+                await new Promise(resolve => setTimeout(resolve, 500)); // 加快商品處理速度
             }
             
             // 關閉批次頁面
             await detailPage.close();
             
-            // 批次間延遲
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            // 批次間延遲（減少）
+            await new Promise(resolve => setTimeout(resolve, 1500)); // 加快批次處理速度
             
             // 顯示批次進度
             const withPrice = scrapedProducts.filter(p => p.price > 0).length;
