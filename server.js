@@ -1790,48 +1790,8 @@ app.get('/api/products', requireAuth, async (req, res) => {
             
             console.log(`✅ 從資料庫讀取到 ${products.length} 個友茂商品`);
             
-            // 如果友茂資料庫商品不足，觸發初始化抓取
-            const expectedMinProducts = 1000; // 友茂預期至少有1000個商品
-            if (products.length < expectedMinProducts) {
-                console.log(`⚠️ 友茂商品數量不足：${products.length}/${expectedMinProducts}，觸發完整抓取...`);
-                try {
-                    const { fetchRutenProducts } = require('./ruten_scraper_stable');
-                    await fetchRutenProducts();
-                    
-                    // 重新從資料庫讀取
-                    const newProducts = await getActiveProducts(storeType);
-                    const newStats = await getProductStats(storeType);
-                    
-                    res.json({
-                        success: true,
-                        products: newProducts,
-                        lastUpdate: newStats.lastUpdate,
-                        total: newStats.total,
-                        imageStats: {
-                            withImages: newStats.withImages,
-                            withoutImages: newStats.withoutImages,
-                            successRate: newStats.imageSuccessRate
-                        }
-                    });
-                    return;
-                } catch (error) {
-                    console.error('友茂初始化抓取失敗:', error.message);
-                    // 返回空資料作為備用
-                    res.json({
-                        success: true,
-                        products: [],
-                        lastUpdate: null,
-                        total: 0,
-                        imageStats: {
-                            withImages: 0,
-                            withoutImages: 0,
-                            successRate: '0.0%'
-                        },
-                        message: '友茂商品抓取中，請稍候再試...'
-                    });
-                    return;
-                }
-            }
+            // 注意：用戶切換選單時，只讀取現有資料，不觸發重新抓取
+            // 重新抓取只在系統初始化、自動更新或手動更新時進行
         } else {
             // 源正山賣場（Yahoo拍賣）
             products = await getActiveProducts(storeType);
@@ -2548,7 +2508,7 @@ setTimeout(async () => {
             // 檢查友茂商品是否需要初始化（少於1000個視為不完整）
             try {
                 const youmaoProducts = await getActiveProducts('youmao');
-                const expectedMinProducts = 1000; // 友茂預期至少有1000個商品
+                const expectedMinProducts = 100; // 友茂預期至少有100個商品（系統初始化時的最低要求）
                 
                 if (youmaoProducts.length < expectedMinProducts) {
                     console.log(`⚠️ 友茂商品數量不足：${youmaoProducts.length}/${expectedMinProducts}，開始完整抓取...`);
