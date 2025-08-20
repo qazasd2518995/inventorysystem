@@ -202,7 +202,15 @@ async function fetchYahooAuctionProductsWithDB() {
                 }
             }
             
-            if (products.length === 0) {
+            // 檢查是否為最後一頁
+            // 源正山正常情況下每頁有60個商品，如果少於60個代表是最後一頁
+            const isLastPage = products.length < 60 && products.length > 0;
+            
+            if (isLastPage) {
+                console.log(`📄 第 ${currentPage} 頁為最後一頁（只有 ${products.length} 個商品）`);
+                hasMorePages = false;
+            } else if (products.length === 0) {
+                console.log(`📄 第 ${currentPage} 頁沒有商品，停止抓取`);
                 hasMorePages = false;
             } else {
                 currentPage++;

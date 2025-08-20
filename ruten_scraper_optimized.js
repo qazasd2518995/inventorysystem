@@ -292,38 +292,50 @@ async function fetchRutenProductsOptimized() {
                 }
             }
             
-            // 檢查是否有下一頁
-            const hasNextPage = await page.evaluate(() => {
-                // 檢查下一頁按鈕
-                const nextButtons = document.querySelectorAll('a[title="下一頁"], .rt-pagination a');
-                for (const button of nextButtons) {
-                    if (button.textContent.includes('下一頁') || button.classList.contains('next')) {
-                        if (!button.classList.contains('disabled')) {
-                            return true;
-                        }
-                    }
-                }
-                
-                // 檢查頁碼資訊
-                const paginationText = document.querySelector('.rt-pagination')?.textContent || '';
-                const pageMatch = paginationText.match(/第\s*(\d+)\s*\/\s*(\d+)\s*頁/);
-                if (pageMatch) {
-                    const current = parseInt(pageMatch[1]);
-                    const total = parseInt(pageMatch[2]);
-                    return current < total;
-                }
-                
-                return false;
-            });
+            // 檢查是否為最後一頁
+            // 友茂正常情況下每頁有30個商品，如果少於30個代表是最後一頁
+            const isLastPage = products.length < 30 && products.length > 0;
             
-            if (!hasNextPage || products.length === 0) {
-                console.log(`📄 第 ${currentPage} 頁為最後一頁`);
+            if (isLastPage) {
+                console.log(`📄 第 ${currentPage} 頁為最後一頁（只有 ${products.length} 個商品）`);
+                hasMorePages = false;
+            } else if (products.length === 0) {
+                console.log(`📄 第 ${currentPage} 頁沒有商品，停止抓取`);
                 hasMorePages = false;
             } else {
-                currentPage++;
-                // 源正山風格的頁面間延遲
-                const pageDelay = process.env.NODE_ENV === 'production' ? 500 : 800;
-                await new Promise(resolve => setTimeout(resolve, pageDelay));
+                // 檢查是否有下一頁按鈕
+                const hasNextPage = await page.evaluate(() => {
+                    // 檢查下一頁按鈕
+                    const nextButtons = document.querySelectorAll('a[title="下一頁"], .rt-pagination a');
+                    for (const button of nextButtons) {
+                        if (button.textContent.includes('下一頁') || button.classList.contains('next')) {
+                            if (!button.classList.contains('disabled')) {
+                                return true;
+                            }
+                        }
+                    }
+                    
+                    // 檢查頁碼資訊
+                    const paginationText = document.querySelector('.rt-pagination')?.textContent || '';
+                    const pageMatch = paginationText.match(/第\s*(\d+)\s*\/\s*(\d+)\s*頁/);
+                    if (pageMatch) {
+                        const current = parseInt(pageMatch[1]);
+                        const total = parseInt(pageMatch[2]);
+                        return current < total;
+                    }
+                    
+                    return false;
+                });
+                
+                if (!hasNextPage) {
+                    console.log(`📄 第 ${currentPage} 頁為最後一頁（無下一頁按鈕）`);
+                    hasMorePages = false;
+                } else {
+                    currentPage++;
+                    // 源正山風格的頁面間延遲
+                    const pageDelay = process.env.NODE_ENV === 'production' ? 500 : 800;
+                    await new Promise(resolve => setTimeout(resolve, pageDelay));
+                }
             }
         }
 
