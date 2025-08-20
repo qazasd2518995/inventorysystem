@@ -2193,6 +2193,44 @@ app.post('/api/refresh', async (req, res) => {
     }
 });
 
+// API路由 - 手動觸發友茂爬蟲
+app.post('/api/refresh-youmao', requireAuth, async (req, res) => {
+    try {
+        console.log('手動觸發友茂商品抓取...');
+        addUpdateLog('info', '手動觸發友茂商品抓取...');
+        
+        const { fetchRutenProducts } = require('./ruten_scraper_stable');
+        await fetchRutenProducts();
+        
+        // 從資料庫讀取最新友茂資料
+        const youmaoProducts = await getActiveProducts('youmao');
+        const youmaoStats = await getProductStats('youmao');
+        
+        console.log(`✅ 友茂商品抓取完成，共 ${youmaoProducts.length} 個商品`);
+        addUpdateLog('success', `友茂商品抓取完成，共 ${youmaoProducts.length} 個商品`);
+        
+        res.json({
+            success: true,
+            message: `友茂商品抓取完成，共 ${youmaoProducts.length} 個商品`,
+            products: youmaoProducts,
+            total: youmaoStats.total,
+            lastUpdate: youmaoStats.lastUpdate,
+            imageStats: {
+                withImages: youmaoStats.withImages,
+                withoutImages: youmaoStats.withoutImages,
+                successRate: youmaoStats.imageSuccessRate
+            }
+        });
+    } catch (error) {
+        console.error('友茂商品抓取失敗:', error);
+        addUpdateLog('error', `友茂商品抓取失敗: ${error.message}`);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // API路由 - 匯出Excel（從資料庫讀取）
 // 新的整合Excel匯出函數
 app.get('/api/export', requireAuth, async (req, res) => {
@@ -2421,13 +2459,29 @@ setInterval(async () => {
         console.log('執行定時檢查更新...');
         isUpdating = true;
         try {
-            // 使用快速檢測模式檢查是否有變更
+            // 檢查源正山商品變更
             const detectionResult = await fullChangeDetection();
             if (detectionResult.changesDetected) {
-                console.log('檢測到變更，執行部分更新...');
+                console.log('檢測到源正山商品變更，執行部分更新...');
                 await partialUpdateProducts(detectionResult);
             } else {
-                console.log('未檢測到變更');
+                console.log('未檢測到源正山商品變更');
+            }
+            
+            // 檢查友茂商品是否需要初始化（避免重複）
+            try {
+                const youmaoProducts = await getActiveProducts('youmao');
+                if (youmaoProducts.length === 0) {
+                    console.log('⚠️ 定時檢查發現友茂資料庫無資料，開始初始化抓取...');
+                    addUpdateLog('info', '定時檢查發現友茂資料庫無資料，開始初始化抓取...');
+                    const { fetchRutenProducts } = require('./ruten_scraper_stable');
+                    await fetchRutenProducts();
+                    addUpdateLog('success', '友茂商品定時初始化完成');
+                    console.log('[SUCCESS] 友茂商品定時初始化完成');
+                }
+            } catch (youmaoError) {
+                console.error('[ERROR] 友茂定時檢查失敗:', youmaoError.message);
+                addUpdateLog('error', `友茂定時檢查失敗: ${youmaoError.message}`);
             }
         } catch (error) {
             console.error('定時檢查更新失敗:', error);
@@ -2449,8 +2503,29 @@ setTimeout(async () => {
             lastUpdateTime = new Date();
             addUpdateLog('info', '系統啟動，載入測試資料，開始完整抓取...');
             
-            // 立即執行完整抓取
+            // 立即執行源正山完整抓取
             await fetchYahooAuctionProducts();
+            addUpdateLog('success', '源正山商品抓取完成');
+            console.log('[SUCCESS] 源正山商品抓取完成');
+            
+            // 檢查友茂商品是否需要初始化
+            try {
+                const youmaoProducts = await getActiveProducts('youmao');
+                if (youmaoProducts.length === 0) {
+                    console.log('⚠️ 友茂資料庫無資料，開始初始化抓取...');
+                    addUpdateLog('info', '友茂資料庫無資料，開始初始化抓取...');
+                    const { fetchRutenProducts } = require('./ruten_scraper_stable');
+                    await fetchRutenProducts();
+                    addUpdateLog('success', '友茂商品抓取完成');
+                    console.log('[SUCCESS] 友茂商品抓取完成');
+                } else {
+                    console.log(`✅ 友茂商品已存在：${youmaoProducts.length} 個`);
+                    addUpdateLog('info', `友茂商品已存在：${youmaoProducts.length} 個`);
+                }
+            } catch (youmaoError) {
+                console.error('[ERROR] 友茂初始化失敗:', youmaoError.message);
+                addUpdateLog('error', `友茂初始化失敗: ${youmaoError.message}`);
+            }
             
             addUpdateLog('success', '系統啟動完成，商品資料抓取完畢');
             console.log('系統初始化完成，商品資料已更新');
