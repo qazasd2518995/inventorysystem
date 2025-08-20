@@ -126,67 +126,34 @@ async function executeFullScraping(storeType = null) {
     }
 }
 
-// 伺服器啟動時的初始化檢查
+// 伺服器啟動時的智能初始化檢查
 async function initializationCheck() {
-    console.log('🔍 伺服器啟動：檢查資料庫是否需要初始化...');
+    console.log('🧠 伺服器啟動：執行智能初始化檢查...');
     
     try {
-        const checkResult = await checkIfScrapingNeeded();
+        // 直接執行智能更新，根據商品數量一致性決定是否更新
+        console.log('📊 根據商品總數一致性決定是否需要更新...');
+        await addUpdateLogToDB('info', '伺服器啟動：執行智能初始化檢查');
         
-        // 只有在資料庫完全沒有資料時才執行初始化
-        const yuanzhengNeedsInit = checkResult.yuanzhengshan.database === 0;
-        const youmaoNeedsInit = checkResult.youmao.database === 0;
+        const updateResult = await smartUpdate({ force: false });
         
-        if (!yuanzhengNeedsInit && !youmaoNeedsInit) {
-            console.log('✅ 資料庫已有資料，跳過初始化');
-            console.log(`   源正山: ${checkResult.yuanzhengshan.database} 個商品`);
-            console.log(`   友茂: ${checkResult.youmao.database} 個商品`);
-            return { initialized: false, reason: 'database_has_data' };
-        }
-
-        console.log('🚀 檢測到空資料庫，執行初始化爬蟲...');
+        await addUpdateLogToDB('success', `伺服器啟動智能檢查完成: ${updateResult.summary}`);
+        console.log(`🎉 智能初始化完成: ${updateResult.summary}`);
         
-        let initResults = {
-            yuanzhengshan: { needed: yuanzhengNeedsInit, executed: false },
-            youmao: { needed: youmaoNeedsInit, executed: false }
+        return { 
+            initialized: true, 
+            type: 'smart_update',
+            result: updateResult 
         };
 
-        if (yuanzhengNeedsInit) {
-            console.log('📈 初始化源正山商品資料...');
-            try {
-                await addUpdateLogToDB('info', '伺服器啟動：初始化源正山商品資料');
-                const yahooResult = await fetchYahooAuctionProductsWithDB();
-                initResults.yuanzhengshan.executed = true;
-                initResults.yuanzhengshan.result = yahooResult;
-                console.log(`✅ 源正山初始化完成：${yahooResult.length} 個商品`);
-            } catch (error) {
-                console.error('❌ 源正山初始化失敗:', error.message);
-                await addUpdateLogToDB('error', `源正山初始化失敗: ${error.message}`);
-                initResults.yuanzhengshan.error = error.message;
-            }
-        }
-
-        if (youmaoNeedsInit) {
-            console.log('📈 初始化友茂商品資料...');
-            try {
-                await addUpdateLogToDB('info', '伺服器啟動：初始化友茂商品資料');
-                const rutenResult = await fetchRutenProducts();
-                initResults.youmao.executed = true;
-                initResults.youmao.result = rutenResult;
-                console.log(`✅ 友茂初始化完成：${rutenResult.totalProducts} 個商品`);
-            } catch (error) {
-                console.error('❌ 友茂初始化失敗:', error.message);
-                await addUpdateLogToDB('error', `友茂初始化失敗: ${error.message}`);
-                initResults.youmao.error = error.message;
-            }
-        }
-
-        return { initialized: true, results: initResults };
-
     } catch (error) {
-        console.error('❌ 初始化檢查失敗:', error.message);
-        await addUpdateLogToDB('error', `初始化檢查失敗: ${error.message}`);
-        return { initialized: false, error: error.message };
+        console.error('❌ 智能初始化失敗:', error.message);
+        await addUpdateLogToDB('error', `智能初始化失敗: ${error.message}`);
+        return { 
+            initialized: false, 
+            error: error.message,
+            type: 'smart_update_failed'
+        };
     }
 }
 

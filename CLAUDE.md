@@ -42,8 +42,9 @@ This is a web scraping and data export system for Yahoo Auction and Ruten Market
 
 - `product_count_checker.js` - Compares marketplace vs database product counts
 - `smart_scraper.js` - Intelligent scraper manager that only runs when needed
-- Server initialization only scrapes if database is empty
+- Server initialization always checks count consistency (not database emptiness)
 - Manual updates use smart logic to avoid unnecessary scraping
+- Both stores are evaluated independently based on count differences
 
 ## Development Commands
 
@@ -62,6 +63,9 @@ npm run build
 
 # Test smart scraper system
 node test_smart_update_only.js
+
+# Test new initialization logic
+node test_new_initialization.js
 ```
 
 ## Key Environment Variables

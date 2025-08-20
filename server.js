@@ -2508,7 +2508,7 @@ setInterval(async () => {
     }
 }, 24 * 60 * 60 * 1000); // 24小時 (1天)
 
-// 智能初始化檢查 - 只在必要時執行爬蟲
+// 智能初始化檢查 - 根據商品數量一致性決定更新
 setTimeout(async () => {
     if (!isUpdating) {
         console.log('🧠 伺服器啟動：執行智能初始化檢查...');
@@ -2520,17 +2520,12 @@ setTimeout(async () => {
             
             const initResult = await initializationCheck();
             
-            if (!initResult.initialized) {
-                if (initResult.reason === 'database_has_data') {
-                    console.log('✅ 資料庫已有資料，跳過初始化爬蟲');
-                    addUpdateLog('info', '系統啟動：資料庫已有資料，無需初始化');
-                } else {
-                    console.log('⚠️ 初始化檢查失敗，但系統可正常運行');
-                    addUpdateLog('warning', `初始化檢查失敗: ${initResult.error || '未知錯誤'}`);
-                }
+            if (initResult.initialized) {
+                console.log('🎉 智能初始化完成');
+                addUpdateLog('success', `系統啟動完成: ${initResult.result?.summary || '智能檢查完成'}`);
             } else {
-                console.log('🎉 初始化完成，資料庫已更新');
-                addUpdateLog('success', '系統啟動：初始化完成，商品資料已更新');
+                console.log('⚠️ 智能初始化失敗，但系統可正常運行');
+                addUpdateLog('warning', `智能初始化失敗: ${initResult.error || '未知錯誤'}`);
             }
             
             console.log('✅ 系統初始化完成，伺服器就緒');
