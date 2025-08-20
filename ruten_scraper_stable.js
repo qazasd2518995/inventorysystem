@@ -15,7 +15,7 @@ async function fetchRutenProducts() {
         // 啟動瀏覽器 - 使用更保守的設定並增加超時時間
         browser = await puppeteer.launch({
             headless: true,
-            protocolTimeout: 120000, // 增加協議超時到2分鐘
+            protocolTimeout: 180000, // 增加協議超時到3分鐘，應對並行處理壓力
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -164,7 +164,7 @@ async function fetchRutenProducts() {
         // 第二階段：批量處理商品詳細信息（新策略）
         console.log('💰 第二階段：批量獲取商品詳細信息...');
         
-        const batchSize = process.env.NODE_ENV === 'production' ? 15 : 10; // 並行處理，減少批量大小避免過載
+        const batchSize = process.env.NODE_ENV === 'production' ? 8 : 10; // 進一步減少並行數量，提高穩定性
         let processedCount = 0;
         const totalProducts = uniqueProductLinks.length;
         
@@ -180,10 +180,10 @@ async function fetchRutenProducts() {
                     detailPage = await browser.newPage();
                     await detailPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
                     
-                    // 訪問商品詳細頁面
+                    // 訪問商品詳細頁面，增加超時時間
                     await detailPage.goto(productLink.url, { 
                         waitUntil: 'domcontentloaded',
-                        timeout: 15000 
+                        timeout: 25000 // 增加頁面載入超時
                     });
 
                     // 縮短等待時間
@@ -305,8 +305,8 @@ async function fetchRutenProducts() {
             
             processedCount += batch.length;
             
-            // 批次間延遲（減少）
-            const batchDelay = process.env.NODE_ENV === 'production' ? 500 : 800;
+            // 批次間延遲（增加以減輕伺服器壓力）
+            const batchDelay = process.env.NODE_ENV === 'production' ? 1000 : 800;
             await new Promise(resolve => setTimeout(resolve, batchDelay));
             
             // 顯示批次進度
