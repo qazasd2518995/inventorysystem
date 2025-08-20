@@ -2162,31 +2162,64 @@ app.post('/api/clear-logs', requireAuth, async (req, res) => {
     }
 });
 
-// API路由 - 強制更新商品資料
+// API路由 - 強制更新所有商品資料（源正山 + 友茂）
 app.post('/api/refresh', async (req, res) => {
     try {
-        console.log('強制更新商品資料...');
+        console.log('手動觸發完整更新（源正山 + 友茂）...');
+        addUpdateLog('info', '手動觸發完整更新（源正山 + 友茂）...');
+        
+        // 更新源正山商品
+        console.log('🔄 開始源正山手動更新...');
+        addUpdateLog('info', '開始源正山手動更新...');
         await fetchYahooAuctionProducts();
+        addUpdateLog('success', '源正山手動更新完成');
+        console.log('[SUCCESS] 源正山手動更新完成');
         
-        // 從資料庫讀取最新資料
-        const products = await getActiveProducts();
-        const stats = await getProductStats();
+        // 更新友茂商品
+        try {
+            console.log('🔄 開始友茂手動更新...');
+            addUpdateLog('info', '開始友茂手動更新...');
+            const { fetchRutenProducts } = require('./ruten_scraper_stable');
+            await fetchRutenProducts();
+            addUpdateLog('success', '友茂手動更新完成');
+            console.log('[SUCCESS] 友茂手動更新完成');
+        } catch (youmaoError) {
+            console.error('[ERROR] 友茂手動更新失敗:', youmaoError.message);
+            addUpdateLog('error', `友茂手動更新失敗: ${youmaoError.message}`);
+        }
         
-        console.log(`✅ 更新完成，從資料庫讀取到 ${products.length} 個商品`);
+        // 從資料庫讀取最新統計
+        const yuanzhengStats = await getProductStats('yuanzhengshan');
+        const youmaoStats = await getProductStats('youmao');
+        
+        addUpdateLog('success', '手動完整更新完成');
+        console.log('[SUCCESS] 手動完整更新完成');
         
         res.json({
             success: true,
-            products: products,
-            lastUpdate: stats.lastUpdate,
-            total: stats.total,
-            imageStats: {
-                withImages: stats.withImages,
-                withoutImages: stats.withoutImages,
-                successRate: stats.imageSuccessRate
+            message: `完整更新完成`,
+            yuanzhengshan: {
+                total: yuanzhengStats.total,
+                lastUpdate: yuanzhengStats.lastUpdate,
+                imageStats: {
+                    withImages: yuanzhengStats.withImages,
+                    withoutImages: yuanzhengStats.withoutImages,
+                    successRate: yuanzhengStats.imageSuccessRate
+                }
+            },
+            youmao: {
+                total: youmaoStats.total,
+                lastUpdate: youmaoStats.lastUpdate,
+                imageStats: {
+                    withImages: youmaoStats.withImages,
+                    withoutImages: youmaoStats.withoutImages,
+                    successRate: youmaoStats.imageSuccessRate
+                }
             }
         });
     } catch (error) {
-        console.error('強制更新錯誤:', error);
+        console.error('手動完整更新錯誤:', error);
+        addUpdateLog('error', `手動完整更新失敗: ${error.message}`);
         res.status(500).json({
             success: false,
             error: error.message
@@ -2454,46 +2487,46 @@ app.get('/api/export', requireAuth, async (req, res) => {
     }
 });
 
-// 設定定時更新 - 每10分鐘檢查一次更新
+// 設定定時更新 - 每24小時（1天）檢查一次更新
 setInterval(async () => {
     if (!isUpdating) {
-        console.log('執行定時檢查更新...');
+        console.log('執行每日定時檢查更新...');
+        addUpdateLog('info', '執行每日定時檢查更新...');
         isUpdating = true;
         try {
-            // 檢查源正山商品變更
-            const detectionResult = await fullChangeDetection();
-            if (detectionResult.changesDetected) {
-                console.log('檢測到源正山商品變更，執行部分更新...');
-                await partialUpdateProducts(detectionResult);
-            } else {
-                console.log('未檢測到源正山商品變更');
+            // 源正山商品完整更新
+            console.log('🔄 開始源正山每日定時更新...');
+            addUpdateLog('info', '開始源正山每日定時更新...');
+            await fetchYahooAuctionProducts();
+            addUpdateLog('success', '源正山每日定時更新完成');
+            console.log('[SUCCESS] 源正山每日定時更新完成');
+            
+            // 友茂商品完整更新
+            try {
+                console.log('🔄 開始友茂每日定時更新...');
+                addUpdateLog('info', '開始友茂每日定時更新...');
+                const { fetchRutenProducts } = require('./ruten_scraper_stable');
+                await fetchRutenProducts();
+                addUpdateLog('success', '友茂每日定時更新完成');
+                console.log('[SUCCESS] 友茂每日定時更新完成');
+            } catch (youmaoError) {
+                console.error('[ERROR] 友茂每日定時更新失敗:', youmaoError.message);
+                addUpdateLog('error', `友茂每日定時更新失敗: ${youmaoError.message}`);
             }
             
-            // 檢查友茂商品是否需要初始化（避免重複）
-            try {
-                const youmaoProducts = await getActiveProducts('youmao');
-                const expectedMinProducts = 1000; // 友茂預期至少有1000個商品
-                
-                if (youmaoProducts.length < expectedMinProducts) {
-                    console.log(`⚠️ 定時檢查發現友茂商品不足：${youmaoProducts.length}/${expectedMinProducts}，開始完整抓取...`);
-                    addUpdateLog('info', `定時檢查發現友茂商品不足：${youmaoProducts.length}/${expectedMinProducts}，開始完整抓取...`);
-                    const { fetchRutenProducts } = require('./ruten_scraper_stable');
-                    await fetchRutenProducts();
-                    addUpdateLog('success', '友茂商品定時初始化完成');
-                    console.log('[SUCCESS] 友茂商品定時初始化完成');
-                }
-            } catch (youmaoError) {
-                console.error('[ERROR] 友茂定時檢查失敗:', youmaoError.message);
-                addUpdateLog('error', `友茂定時檢查失敗: ${youmaoError.message}`);
-            }
+            addUpdateLog('success', '每日定時更新完成');
+            console.log('[SUCCESS] 每日定時更新完成');
         } catch (error) {
-            console.error('定時檢查更新失敗:', error);
-            addUpdateLog('error', `定時檢查更新失敗: ${error.message}`);
+            console.error('每日定時更新失敗:', error);
+            addUpdateLog('error', `每日定時更新失敗: ${error.message}`);
         } finally {
             isUpdating = false;
         }
+    } else {
+        console.log('⚠️ 系統正在更新中，跳過本次每日定時更新');
+        addUpdateLog('warning', '系統正在更新中，跳過本次每日定時更新');
     }
-}, 10 * 60 * 1000); // 10分鐘
+}, 24 * 60 * 60 * 1000); // 24小時 (1天)
 
 // 啟動時立即執行完整抓取
 setTimeout(async () => {
