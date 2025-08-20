@@ -2128,10 +2128,20 @@ app.post('/api/clear-logs', requireAuth, async (req, res) => {
 // API路由 - 手動更新商品資料（強制執行爬蟲）
 app.post('/api/refresh', async (req, res) => {
     try {
-        console.log('🔧 手動觸發強制更新（跳過數量檢查）...');
+        // 從請求中獲取賣場類型
+        const { store } = req.body;
         
-        // 手動更新時使用 force: true 強制執行爬蟲
-        const result = await smartUpdate({ force: true });
+        if (store) {
+            console.log(`🔧 手動觸發 ${store} 強制更新（跳過數量檢查）...`);
+        } else {
+            console.log('🔧 手動觸發全部賣場強制更新（跳過數量檢查）...');
+        }
+        
+        // 手動更新時使用 force: true 強制執行爬蟲，可指定特定賣場
+        const result = await smartUpdate({ 
+            force: true,
+            storeType: store || null  // 如果有指定賣場就只更新該賣場
+        });
         
         // 從資料庫讀取最新統計
         const yuanzhengStats = await getProductStats('yuanzhengshan');

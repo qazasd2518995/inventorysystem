@@ -215,18 +215,22 @@ async function refreshProducts() {
     refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>智能檢查中...';
     
     try {
-        // 使用智能更新端點
-        const response = await axios.post('/api/refresh');
+        // 使用智能更新端點，傳送當前選擇的賣場
+        const response = await axios.post('/api/refresh', {
+            store: currentStore  // 傳送當前選擇的賣場（yuanzhengshan 或 youmao）
+        });
         
         if (response.data.success) {
             // 重新載入當前賣場的商品資料
             await loadProducts();
             
             // 根據智能更新的結果顯示相應訊息
-            const message = response.data.message || '智能更新完成';
+            const storeName = getStoreDisplayName(currentStore);
+            const message = response.data.message || `${storeName} 智能更新完成`;
             showSuccess(message);
         } else {
-            showError(`智能更新失敗: ${response.data.error || '未知錯誤'}`);
+            const storeName = getStoreDisplayName(currentStore);
+            showError(`${storeName} 智能更新失敗: ${response.data.error || '未知錯誤'}`);
         }
     } catch (error) {
         console.error('智能更新時發生錯誤:', error);
