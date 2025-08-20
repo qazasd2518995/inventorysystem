@@ -164,7 +164,7 @@ async function fetchRutenProducts() {
         // 第二階段：批量處理商品詳細信息（新策略）
         console.log('💰 第二階段：批量獲取商品詳細信息...');
         
-        const batchSize = process.env.NODE_ENV === 'production' ? 8 : 10; // 進一步減少並行數量，提高穩定性
+        const batchSize = process.env.NODE_ENV === 'production' ? 5 : 8; // 大幅減少並行數量，配合重試機制
         let processedCount = 0;
         const totalProducts = uniqueProductLinks.length;
         
@@ -172,23 +172,43 @@ async function fetchRutenProducts() {
             const batch = uniqueProductLinks.slice(i, i + batchSize);
             console.log(`\n🚀 並行處理批次 ${Math.floor(i / batchSize) + 1}/${Math.ceil(uniqueProductLinks.length / batchSize)} (${batch.length} 個商品)`);
             
-            // 並行處理批次內的所有商品
+            // 並行處理批次內的所有商品，包含重試機制
             const batchPromises = batch.map(async (productLink, index) => {
-                let detailPage = null;
-                try {
-                    // 為每個商品創建獨立的頁面
-                    detailPage = await browser.newPage();
-                    await detailPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-                    
-                    // 訪問商品詳細頁面，增加超時時間
-                    await detailPage.goto(productLink.url, { 
-                        waitUntil: 'domcontentloaded',
-                        timeout: 25000 // 增加頁面載入超時
-                    });
+                const maxRetries = 3; // 最多重試3次
+                let lastError = null;
+                
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    let detailPage = null;
+                    try {
+                        // 每次重試都創建新的頁面
+                        detailPage = await browser.newPage();
+                        
+                        // 設定頁面優化
+                        await detailPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+                        await detailPage.setViewport({ width: 1280, height: 720 });
+                        
+                        // 禁用圖片和CSS載入以提高速度
+                        await detailPage.setRequestInterception(true);
+                        detailPage.on('request', (req) => {
+                            const resourceType = req.resourceType();
+                            if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font') {
+                                req.abort();
+                            } else {
+                                req.continue();
+                            }
+                        });
+                        
+                        // 訪問商品詳細頁面，根據重試次數調整超時
+                        const timeout = attempt === 1 ? 20000 : 30000 + (attempt * 5000);
+                        await detailPage.goto(productLink.url, { 
+                            waitUntil: 'domcontentloaded',
+                            timeout: timeout
+                        });
 
-                    // 縮短等待時間
-                    const detailDelay = process.env.NODE_ENV === 'production' ? 300 : 500;
-                    await new Promise(resolve => setTimeout(resolve, detailDelay));
+                        // 根據重試次數調整等待時間
+                        const detailDelay = process.env.NODE_ENV === 'production' ? 
+                            (300 + attempt * 200) : (500 + attempt * 200);
+                        await new Promise(resolve => setTimeout(resolve, detailDelay));
 
                     // 獲取商品詳細信息
                     const productDetails = await detailPage.evaluate(() => {
@@ -257,29 +277,44 @@ async function fetchRutenProducts() {
                         store_type: 'youmao'
                     };
 
+                    // 成功處理，跳出重試循環
                     return product;
 
-                } catch (error) {
-                    console.error(`處理商品 ${productLink.id} 失敗:`, error.message);
-                    
-                    // 確保頁面被關閉
-                    if (detailPage) {
-                        try {
-                            await detailPage.close();
-                        } catch (closeError) {
-                            // 忽略關閉錯誤
+                    } catch (error) {
+                        lastError = error;
+                        
+                        // 確保頁面被關閉
+                        if (detailPage) {
+                            try {
+                                await detailPage.close();
+                            } catch (closeError) {
+                                // 忽略關閉錯誤
+                            }
+                            detailPage = null;
+                        }
+                        
+                        // 如果不是最後一次重試，記錄並繼續
+                        if (attempt < maxRetries) {
+                            console.log(`⚠️ 商品 ${productLink.id} 第${attempt}次嘗試失敗，準備重試: ${error.message.slice(0, 50)}...`);
+                            
+                            // 重試前等待更長時間
+                            const retryDelay = attempt * 1000; // 第1次重試等1秒，第2次等2秒
+                            await new Promise(resolve => setTimeout(resolve, retryDelay));
+                        } else {
+                            console.error(`❌ 商品 ${productLink.id} 所有重試失敗:`, error.message);
                         }
                     }
-                    
-                    // 返回基本信息
-                    return {
-                        id: productLink.id,
-                        name: `商品 ${productLink.id}`,
-                        price: 0,
-                        imageUrl: productLink.imageUrl,
-                        url: productLink.url,
-                        store_type: 'youmao'
-                    };
+                }
+                
+                // 所有重試都失敗，返回基本信息
+                return {
+                    id: productLink.id,
+                    name: `商品 ${productLink.id}`,
+                    price: 0,
+                    imageUrl: productLink.imageUrl,
+                    url: productLink.url,
+                    store_type: 'youmao'
+                };
                 }
             });
 
