@@ -17,18 +17,19 @@ RUN apt-get update && apt-get install -y \
 # 設置工作目錄
 WORKDIR /app
 
+# 使用系統安裝的 Chrome，避免 npm ci 再下載一份瀏覽器。
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+
 # 複製 package.json 和 package-lock.json
 COPY package*.json ./
 
 # 安裝依賴
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # 複製應用程式代碼
 COPY . .
-
-# 設置環境變數
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 # 暴露端口
 EXPOSE 3000

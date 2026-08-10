@@ -198,68 +198,68 @@ async function upsertProduct(product, storeType = 'yuanzhengshan') {
     }
 }
 
-// 批量插入或更新商品
-async function upsertProducts(products, storeType = 'yuanzhengshan') {
+async function upsertProductsWithClient(client, products, storeType) {
     if (!Array.isArray(products) || products.length === 0) return [];
 
+    console.log(`📝 開始批量更新 ${products.length} 個${storeType}商品到資料庫...`);
+    const results = [];
+    const batchSize = 250;
+
+    for (let i = 0; i < products.length; i += batchSize) {
+        const batch = products.slice(i, i + batchSize);
+        const params = [];
+        const valueSql = batch.map((product, batchIndex) => {
+            const base = batchIndex * 8;
+            params.push(
+                String(product.id),
+                storeType,
+                product.name,
+                Number(product.price) || 0,
+                product.imageUrl || null,
+                product.url || product.link || null,
+                product.scrapedAt ? new Date(product.scrapedAt) : new Date(),
+                new Date()
+            );
+            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
+        }).join(',');
+
+        const result = await client.query(`
+            INSERT INTO products (id, store_type, name, price, image_url, product_url, scraped_at, updated_at)
+            VALUES ${valueSql}
+            ON CONFLICT (id, store_type)
+            DO UPDATE SET
+                name = EXCLUDED.name,
+                price = EXCLUDED.price,
+                image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
+                product_url = COALESCE(NULLIF(EXCLUDED.product_url, ''), products.product_url),
+                updated_at = CURRENT_TIMESTAMP,
+                is_active = TRUE
+            WHERE products.name IS DISTINCT FROM EXCLUDED.name
+               OR products.price IS DISTINCT FROM EXCLUDED.price
+               OR (NULLIF(EXCLUDED.image_url, '') IS NOT NULL AND products.image_url IS DISTINCT FROM EXCLUDED.image_url)
+               OR (NULLIF(EXCLUDED.product_url, '') IS NOT NULL AND products.product_url IS DISTINCT FROM EXCLUDED.product_url)
+               OR products.is_active IS DISTINCT FROM TRUE
+            RETURNING *
+        `, params);
+
+        results.push(...result.rows);
+        console.log(`✅ 已處理 ${Math.min(i + batchSize, products.length)}/${products.length} 個商品`);
+    }
+
+    console.log(`🎉 批量更新完成，實際新增或變更 ${results.length} 個商品`);
+    return results;
+}
+
+// 批量插入或更新商品；單獨呼叫時自行建立交易。
+async function upsertProducts(products, storeType = 'yuanzhengshan') {
+    if (!Array.isArray(products) || products.length === 0) return [];
     const client = await pool.connect();
-    
+
     try {
         await client.query('BEGIN');
-        
-        console.log(`📝 開始批量更新 ${products.length} 個${storeType}商品到資料庫...`);
-        
-        const results = [];
-        const batchSize = 250;
-        
-        for (let i = 0; i < products.length; i += batchSize) {
-            const batch = products.slice(i, i + batchSize);
-            
-            const params = [];
-            const valueSql = batch.map((product, batchIndex) => {
-                const base = batchIndex * 8;
-                params.push(
-                    String(product.id),
-                    storeType,
-                    product.name,
-                    Number(product.price) || 0,
-                    product.imageUrl || null,
-                    product.url || product.link || null,
-                    product.scrapedAt ? new Date(product.scrapedAt) : new Date(),
-                    new Date()
-                );
-                return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
-            }).join(',');
-
-            const result = await client.query(`
-                INSERT INTO products (id, store_type, name, price, image_url, product_url, scraped_at, updated_at)
-                VALUES ${valueSql}
-                ON CONFLICT (id, store_type)
-                DO UPDATE SET
-                    name = EXCLUDED.name,
-                    price = EXCLUDED.price,
-                    image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
-                    product_url = COALESCE(NULLIF(EXCLUDED.product_url, ''), products.product_url),
-                    updated_at = CURRENT_TIMESTAMP,
-                    is_active = TRUE
-                WHERE products.name IS DISTINCT FROM EXCLUDED.name
-                   OR products.price IS DISTINCT FROM EXCLUDED.price
-                   OR (NULLIF(EXCLUDED.image_url, '') IS NOT NULL AND products.image_url IS DISTINCT FROM EXCLUDED.image_url)
-                   OR (NULLIF(EXCLUDED.product_url, '') IS NOT NULL AND products.product_url IS DISTINCT FROM EXCLUDED.product_url)
-                   OR products.is_active IS DISTINCT FROM TRUE
-                RETURNING *
-            `, params);
-
-            results.push(...result.rows);
-            
-            console.log(`✅ 已處理 ${Math.min(i + batchSize, products.length)}/${products.length} 個商品`);
-        }
-        
+        const results = await upsertProductsWithClient(client, products, storeType);
         await client.query('COMMIT');
-        console.log(`🎉 批量更新完成，實際新增或變更 ${results.length} 個商品`);
-        
         return results;
-        
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('❌ 批量更新失敗:', error.message);
@@ -373,23 +373,23 @@ async function getProductStats(storeType = null) {
     }
 }
 
+async function deactivateProductsWithClient(client, productIds, storeType) {
+    if (productIds.length === 0) return [];
+    const placeholders = productIds.map((_, index) => `$${index + 1}`).join(',');
+    const result = await client.query(`
+        UPDATE products
+        SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (${placeholders}) AND store_type = $${productIds.length + 1}
+        RETURNING id, name
+    `, [...productIds, storeType]);
+    return result.rows;
+}
+
 // 標記商品為非活躍（下架）
 async function deactivateProducts(productIds, storeType = 'yuanzhengshan') {
     const client = await pool.connect();
-    
     try {
-        if (productIds.length === 0) return [];
-        
-        const placeholders = productIds.map((_, index) => `$${index + 1}`).join(',');
-        const result = await client.query(`
-            UPDATE products 
-            SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP 
-            WHERE id IN (${placeholders}) AND store_type = $${productIds.length + 1}
-            RETURNING id, name
-        `, [...productIds, storeType]);
-        
-        return result.rows;
-        
+        return await deactivateProductsWithClient(client, productIds, storeType);
     } finally {
         client.release();
     }
@@ -400,6 +400,7 @@ async function compareAndUpdateProducts(newProducts, storeType = 'yuanzhengshan'
     const client = await pool.connect();
     
     try {
+        await client.query('BEGIN');
         console.log(`🔍 開始比較${storeType}商品差異...`);
         
         // 獲取現有商品
@@ -474,11 +475,11 @@ async function compareAndUpdateProducts(newProducts, storeType = 'yuanzhengshan'
         
         // 執行更新
         if (productsToUpdate.length > 0) {
-            await upsertProducts(productsToUpdate, storeType);
+            await upsertProductsWithClient(client, productsToUpdate, storeType);
         }
         
         if (removedProductIds.length > 0) {
-            await deactivateProducts(removedProductIds, storeType);
+            await deactivateProductsWithClient(client, removedProductIds, storeType);
         }
 
         if (priceChanges.length > 0) {
@@ -494,7 +495,8 @@ async function compareAndUpdateProducts(newProducts, storeType = 'yuanzhengshan'
                 VALUES ${values}
             `, params);
         }
-        
+
+        await client.query('COMMIT');
         return {
             newCount,
             modifiedCount,
@@ -502,7 +504,10 @@ async function compareAndUpdateProducts(newProducts, storeType = 'yuanzhengshan'
             priceChangedCount: priceChanges.length,
             totalUpdated: productsToUpdate.length
         };
-        
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(`❌ ${storeType}商品差異更新失敗，已回復交易:`, error.message);
+        throw error;
     } finally {
         client.release();
     }
@@ -635,25 +640,43 @@ async function addUpdateLogToDB(type, message, details = null) {
 }
 
 // 獲取更新日誌
-async function getUpdateLogs(limit = 50) {
+async function getUpdateLogs(limit = 50, offset = 0, type = null) {
     const client = await pool.connect();
     
     try {
+        const params = [];
+        let whereSql = '';
+        if (type) {
+            params.push(type);
+            whereSql = `WHERE type = $${params.length}`;
+        }
+        params.push(limit, offset);
+        const limitParam = `$${params.length - 1}`;
+        const offsetParam = `$${params.length}`;
+        const countResult = await client.query(`
+            SELECT COUNT(*) AS total
+            FROM update_logs
+            ${whereSql}
+        `, type ? [type] : []);
         const result = await client.query(`
             SELECT id, type, message, details, created_at as timestamp
-            FROM update_logs 
-            ORDER BY created_at DESC 
-            LIMIT $1
-        `, [limit]);
-        
-        return result.rows.map(row => ({
+            FROM update_logs
+            ${whereSql}
+            ORDER BY created_at DESC
+            LIMIT ${limitParam} OFFSET ${offsetParam}
+        `, params);
+
+        const logs = result.rows.map(row => ({
             id: row.id,
             type: row.type,
             message: row.message,
             details: row.details,
             timestamp: row.timestamp.toISOString()
         }));
-        
+        return {
+            logs,
+            total: Number.parseInt(countResult.rows[0].total, 10)
+        };
     } finally {
         client.release();
     }
@@ -692,6 +715,11 @@ async function testConnection() {
     }
 }
 
+async function checkDatabaseHealth() {
+    await pool.query({ text: 'SELECT 1', query_timeout: 2000 });
+    return true;
+}
+
 // 關閉連接池
 async function closePool() {
     await pool.end();
@@ -710,6 +738,7 @@ module.exports = {
     getUpdateLogs,
     clearUpdateLogs,
     testConnection,
+    checkDatabaseHealth,
     closePool,
     tryAcquireSyncLock,
     recordSyncState,

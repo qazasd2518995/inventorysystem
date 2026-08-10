@@ -2,15 +2,23 @@
 let allProducts = [];
 let filteredProducts = [];
 let autoRefreshInterval = null;
+let updateLogsInterval = null;
 let isAuthenticated = false;
 let currentStore = 'yuanzhengshan'; // 預設為源正山
 const dataVersions = {};
+const PLACEHOLDER_IMAGE = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+        <rect width="400" height="400" fill="#f1f3f5"/>
+        <text x="200" y="205" text-anchor="middle" fill="#868e96" font-family="sans-serif" font-size="28">無圖片</text>
+    </svg>
+`)}`;
 
 // DOM 載入完成後初始化
 document.addEventListener('DOMContentLoaded', function() {
-    checkAuthStatus();
     initializeSearch();
     initializeStoreSelector();
+    setupEventListeners();
+    checkAuthStatus();
 });
 
 // 檢查登入狀態
@@ -21,7 +29,6 @@ async function checkAuthStatus() {
             isAuthenticated = true;
             showMainContent();
             loadProducts();
-            setupEventListeners();
             setupAutoRefresh();
             startUpdateLogsPolling();
         } else {
@@ -76,8 +83,8 @@ async function handleLogin(event) {
             isAuthenticated = true;
             showMainContent();
             loadProducts();
-            setupEventListeners();
             setupAutoRefresh();
+            startUpdateLogsPolling();
         }
     } catch (error) {
         console.error('登入失敗:', error);
@@ -105,6 +112,11 @@ async function logout() {
         // 清除定時器
         if (autoRefreshInterval) {
             clearInterval(autoRefreshInterval);
+            autoRefreshInterval = null;
+        }
+        if (updateLogsInterval) {
+            clearInterval(updateLogsInterval);
+            updateLogsInterval = null;
         }
         
         // 清除資料
@@ -125,21 +137,12 @@ async function logout() {
 
 // 設定事件監聽器
 function setupEventListeners() {
-    // 品名搜尋功能
-    const searchNameInput = document.getElementById('searchNameInput');
-    if (searchNameInput) {
-        searchNameInput.addEventListener('input', function(e) {
-            performSearch();
-        });
-    }
-    
-    // 價格搜尋功能
-    const searchPriceInput = document.getElementById('searchPriceInput');
-    if (searchPriceInput) {
-        searchPriceInput.addEventListener('input', function(e) {
-            performSearch();
-        });
-    }
+    document.getElementById('loginForm')?.addEventListener('submit', handleLogin);
+    document.getElementById('logoutBtn')?.addEventListener('click', logout);
+    document.getElementById('exportBtn')?.addEventListener('click', exportExcel);
+    document.getElementById('smartRefreshBtn')?.addEventListener('click', event => refreshProducts(event, false));
+    document.getElementById('fullRefreshBtn')?.addEventListener('click', event => refreshProducts(event, true));
+    document.getElementById('clearLogsBtn')?.addEventListener('click', clearUpdateLogs);
 
     // 自動更新開關
     const autoRefreshToggle = document.getElementById('autoRefresh');
@@ -277,7 +280,7 @@ function displayProducts(products) {
     if (!tbody) return;
     
     // 清空表格
-    tbody.innerHTML = '';
+    tbody.replaceChildren();
     
     if (products.length === 0) {
         productsTable.style.display = 'none';
@@ -292,35 +295,70 @@ function displayProducts(products) {
     products.forEach(product => {
         const row = document.createElement('tr');
         row.className = 'fade-in';
-        
-        row.innerHTML = `
-            <td>
-                <img src="${product.imageUrl || 'https://via.placeholder.com/100'}" 
-                     alt="${product.name}" 
-                     class="product-img-mobile"
-                     loading="lazy"
-                     decoding="async"
-                     onerror="this.src='https://via.placeholder.com/100'"
-                     onclick='showProductDetail(${JSON.stringify(product).replace(/'/g, "&#39;")})'>
-            </td>
-            <td class="price-tag-mobile">NT$ ${product.price.toLocaleString()}</td>
-            <td>
-                <div class="product-name-mobile" title="${product.name}">
-                    ${product.name}
-                </div>
-            </td>
-            <td>
-                <button class="btn btn-sm btn-outline-primary me-1" onclick='showProductDetail(${JSON.stringify(product).replace(/'/g, "&#39;")})'>  
-                    <i class="bi bi-eye"></i>
-                </button>
-                <a href="${product.url}" target="_blank" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-box-arrow-up-right"></i>
-                </a>
-            </td>
-        `;
+
+        const imageCell = document.createElement('td');
+        const image = document.createElement('img');
+        image.src = safeHttpUrl(product.imageUrl, PLACEHOLDER_IMAGE);
+        image.alt = String(product.name || '商品圖片');
+        image.className = 'product-img-mobile';
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.addEventListener('error', () => {
+            if (image.src !== PLACEHOLDER_IMAGE) image.src = PLACEHOLDER_IMAGE;
+        }, { once: true });
+        image.addEventListener('click', () => showProductDetail(product));
+        imageCell.appendChild(image);
+
+        const priceCell = document.createElement('td');
+        priceCell.className = 'price-tag-mobile';
+        priceCell.textContent = `NT$ ${Number(product.price || 0).toLocaleString('zh-TW')}`;
+
+        const nameCell = document.createElement('td');
+        const productName = document.createElement('div');
+        productName.className = 'product-name-mobile';
+        productName.title = String(product.name || '');
+        productName.textContent = String(product.name || '');
+        nameCell.appendChild(productName);
+
+        const actionsCell = document.createElement('td');
+        const detailButton = document.createElement('button');
+        detailButton.type = 'button';
+        detailButton.className = 'btn btn-sm btn-outline-primary me-1';
+        detailButton.setAttribute('aria-label', '查看商品詳情');
+        const detailIcon = document.createElement('i');
+        detailIcon.className = 'bi bi-eye';
+        detailButton.appendChild(detailIcon);
+        detailButton.addEventListener('click', () => showProductDetail(product));
+        actionsCell.appendChild(detailButton);
+
+        const productUrl = safeHttpUrl(product.url, null);
+        if (productUrl) {
+            const productLink = document.createElement('a');
+            productLink.href = productUrl;
+            productLink.target = '_blank';
+            productLink.rel = 'noopener noreferrer';
+            productLink.className = 'btn btn-sm btn-outline-secondary';
+            productLink.setAttribute('aria-label', '開啟原始商品頁面');
+            const linkIcon = document.createElement('i');
+            linkIcon.className = 'bi bi-box-arrow-up-right';
+            productLink.appendChild(linkIcon);
+            actionsCell.appendChild(productLink);
+        }
+
+        row.append(imageCell, priceCell, nameCell, actionsCell);
         
         tbody.appendChild(row);
     });
+}
+
+function safeHttpUrl(value, fallback = null) {
+    if (!value || typeof value !== 'string') return fallback;
+    try {
+        const url = new URL(value, window.location.origin);
+        return ['http:', 'https:'].includes(url.protocol) ? url.href : fallback;
+    } catch {
+        return fallback;
+    }
 }
 
 // 篩選商品
@@ -344,77 +382,28 @@ function showProductDetail(product) {
     if (!product) return;
     
     // 更新 Modal 內容
-    document.getElementById('modalImage').src = product.imageUrl || 'https://via.placeholder.com/400';
-    document.getElementById('modalTitle').textContent = product.name;
+    const modalImage = document.getElementById('modalImage');
+    modalImage.src = safeHttpUrl(product.imageUrl, PLACEHOLDER_IMAGE);
+    modalImage.onerror = () => {
+        modalImage.onerror = null;
+        modalImage.src = PLACEHOLDER_IMAGE;
+    };
+    document.getElementById('modalTitle').textContent = String(product.name || '');
     // 移除商品編號顯示
     const modalIdElement = document.getElementById('modalId');
     if (modalIdElement) {
         modalIdElement.parentElement.style.display = 'none';
     }
-    document.getElementById('modalPrice').textContent = product.price.toLocaleString();
-    document.getElementById('modalLink').href = product.url;
+    document.getElementById('modalPrice').textContent = Number(product.price || 0).toLocaleString('zh-TW');
+    const modalLink = document.getElementById('modalLink');
+    const productUrl = safeHttpUrl(product.url, null);
+    modalLink.href = productUrl || '#';
+    modalLink.style.display = productUrl ? 'inline-block' : 'none';
+    modalLink.rel = 'noopener noreferrer';
     
     // 顯示 Modal
     const modal = new bootstrap.Modal(document.getElementById('productModal'));
     modal.show();
-}
-
-// 匯出 Excel
-async function exportExcel() {
-    const exportBtn = event.target;
-    exportBtn.disabled = true;
-    exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>匯出中...';
-    
-    try {
-        // 使用 axios 下載檔案
-        const response = await axios.get('/api/export', {
-            responseType: 'blob'
-        });
-        
-        // 建立下載連結
-        const url = window.URL.createObjectURL(new Blob([response.data]));
-        const link = document.createElement('a');
-        link.href = url;
-        
-        // 從 response headers 取得檔名，如果沒有就使用預設檔名
-        const contentDisposition = response.headers['content-disposition'];
-        let fileName = `商品列表_${new Date().toISOString().split('T')[0]}.xlsx`;
-        
-        if (contentDisposition) {
-            const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-            if (fileNameMatch && fileNameMatch[1]) {
-                fileName = fileNameMatch[1].replace(/['"]/g, '');
-                // 解碼中文檔名
-                try {
-                    fileName = decodeURIComponent(fileName);
-                } catch (e) {
-                    // 如果解碼失敗，使用原始檔名
-                }
-            }
-        }
-        
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
-        
-        showSuccess('Excel 檔案已成功匯出');
-    } catch (error) {
-        console.error('匯出 Excel 時發生錯誤:', error);
-        
-        // 檢查是否為認證錯誤
-        if (error.response && error.response.status === 401) {
-            isAuthenticated = false;
-            showLoginForm();
-            return;
-        }
-        
-        showError('匯出失敗，請稍後再試');
-    } finally {
-        exportBtn.disabled = false;
-        exportBtn.innerHTML = '<i class="bi bi-file-earmark-excel"></i> 匯出 Excel';
-    }
 }
 
 // 更新統計資訊
@@ -503,10 +492,15 @@ function showSuccess(message) {
     const successDiv = document.createElement('div');
     successDiv.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
     successDiv.style.zIndex = '9999';
-    successDiv.innerHTML = `
-        <i class="bi bi-check-circle me-2"></i>${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
+    const icon = document.createElement('i');
+    icon.className = 'bi bi-check-circle me-2';
+    const messageNode = document.createTextNode(String(message));
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'btn-close';
+    closeButton.setAttribute('data-bs-dismiss', 'alert');
+    closeButton.setAttribute('aria-label', '關閉');
+    successDiv.append(icon, messageNode, closeButton);
     
     document.body.appendChild(successDiv);
     
@@ -555,11 +549,15 @@ function renderUpdateLogs(logs) {
     if (!logsList) return;
     
     if (!logs || logs.length === 0) {
-        logsList.innerHTML = '<p class="text-muted text-center">暫無更新日誌</p>';
+        const emptyMessage = document.createElement('p');
+        emptyMessage.className = 'text-muted text-center';
+        emptyMessage.textContent = '暫無更新日誌';
+        logsList.replaceChildren(emptyMessage);
         return;
     }
-    
-    const logsHtml = logs.map(log => {
+
+    const fragment = document.createDocumentFragment();
+    logs.forEach(log => {
         const timestamp = new Date(log.timestamp).toLocaleString('zh-TW', {
             month: 'short',
             day: 'numeric',
@@ -567,33 +565,40 @@ function renderUpdateLogs(logs) {
             minute: '2-digit'
         });
         
-        let detailsHtml = '';
+        const entry = document.createElement('div');
+        const safeType = ['info', 'success', 'warning', 'error', 'new', 'modified', 'removed'].includes(log.type)
+            ? log.type
+            : 'info';
+        entry.className = `log-entry log-${safeType}`;
+
+        const timestampElement = document.createElement('div');
+        timestampElement.className = 'log-timestamp';
+        timestampElement.textContent = timestamp;
+        const messageElement = document.createElement('div');
+        messageElement.className = 'log-message';
+        messageElement.textContent = String(log.message || '');
+        entry.append(timestampElement, messageElement);
+
         if (log.details && log.details.imageStats) {
             const stats = log.details.imageStats;
-            detailsHtml = `
-                <div class="log-details">
-                    <span class="image-stats-badge">
-                        <i class="bi bi-image"></i> ${stats.withImages}/${stats.total} 
-                        (${stats.successRate})
-                    </span>
-                    ${stats.withoutImages > 0 ? 
-                        `<span class="image-stats-badge text-warning">
-                            <i class="bi bi-exclamation-triangle"></i> ${stats.withoutImages} 無圖片
-                        </span>` : ''}
-                </div>
-            `;
+            const details = document.createElement('div');
+            details.className = 'log-details';
+            const imageStats = document.createElement('span');
+            imageStats.className = 'image-stats-badge';
+            imageStats.textContent = `圖片 ${stats.withImages}/${stats.total} (${stats.successRate})`;
+            details.appendChild(imageStats);
+            if (Number(stats.withoutImages) > 0) {
+                const missingImages = document.createElement('span');
+                missingImages.className = 'image-stats-badge text-warning';
+                missingImages.textContent = `${stats.withoutImages} 無圖片`;
+                details.appendChild(missingImages);
+            }
+            entry.appendChild(details);
         }
-        
-        return `
-            <div class="log-entry log-${log.type}">
-                <div class="log-timestamp">${timestamp}</div>
-                <div class="log-message">${log.message}</div>
-                ${detailsHtml}
-            </div>
-        `;
-    }).join('');
-    
-    logsList.innerHTML = logsHtml;
+
+        fragment.appendChild(entry);
+    });
+    logsList.replaceChildren(fragment);
 }
 
 // 清除更新日誌
@@ -622,7 +627,8 @@ function startUpdateLogsPolling() {
     loadUpdateLogs();
     
     // 日誌不是即時關鍵資料，降低為每2分鐘，頁面在背景時不請求。
-    setInterval(() => {
+    if (updateLogsInterval) clearInterval(updateLogsInterval);
+    updateLogsInterval = setInterval(() => {
         if (!document.hidden) loadUpdateLogs();
     }, 120000);
 }
@@ -693,11 +699,16 @@ function updateSearchResultsInfo(searchTerm, resultCount, totalCount) {
     }
     
     if (searchTerm.trim()) {
-        searchInfo.innerHTML = `
-            <i class="bi bi-search"></i> 
-            搜尋「<strong>${searchTerm}</strong>」找到 <strong>${resultCount}</strong> 個商品（共 ${totalCount} 個）
-            ${resultCount === 0 ? '<span class="text-muted ms-2">試試其他關鍵字或價格範圍</span>' : ''}
-        `;
+        searchInfo.replaceChildren();
+        const message = document.createElement('span');
+        message.textContent = `搜尋「${searchTerm}」找到 ${resultCount} 個商品（共 ${totalCount} 個）`;
+        searchInfo.appendChild(message);
+        if (resultCount === 0) {
+            const suggestion = document.createElement('span');
+            suggestion.className = 'text-muted ms-2';
+            suggestion.textContent = '試試其他關鍵字或價格範圍';
+            searchInfo.appendChild(suggestion);
+        }
         searchInfo.style.display = 'block';
     } else {
         searchInfo.style.display = 'none';
@@ -889,8 +900,8 @@ function hideLoadingState() {
 }
 
 // 匯出Excel
-async function exportExcel() {
-    const exportBtn = event.target;
+async function exportExcel(event) {
+    const exportBtn = event.currentTarget;
     const originalText = exportBtn.innerHTML;
     
     exportBtn.disabled = true;

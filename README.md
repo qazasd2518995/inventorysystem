@@ -16,6 +16,8 @@
 - 露天使用賣場前端本身的批次 JSON API，同步過程不啟動 Chromium、不下載商品圖片，並能偵測商品數不變時的價格調整。
 - PostgreSQL advisory lock 防止多個 Render 工作同時同步。
 - API 失敗或抓取結果不完整時保留原資料，不會把失敗誤判成全數下架。
+- 登入密碼使用 bcrypt 雜湊、登入端點有限速，Session 儲存在 PostgreSQL，Render 重啟後仍有效。
+- 外部商品與日誌內容以安全 DOM API 顯示，並透過 Content Security Policy 限制可執行來源。
 
 ## 常用指令
 
@@ -47,3 +49,9 @@ npm run sync:scheduled
 - `GET /api/export`：匯出 Excel。
 
 環境變數範例請見 `env.example`。正式資料庫密碼、登入密碼與 Render API Key 不得寫入儲存庫。
+
+登入密碼請設定為 `LOGIN_PASSWORD_HASH`，不要在正式環境保留 `LOGIN_PASSWORD`。可使用以下指令產生 bcrypt 雜湊：
+
+```bash
+node -e "require('bcryptjs').hash('請替換成密碼', 12).then(console.log)"
+```
