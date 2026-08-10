@@ -5,7 +5,23 @@ let autoRefreshInterval = null;
 let updateLogsInterval = null;
 let isAuthenticated = false;
 let currentStore = 'yuanzhengshan'; // 預設為源正山
+let currentPage = 1;
+let searchTimer = null;
 const dataVersions = {};
+const PRODUCTS_PER_PAGE = 50;
+const numberFormatter = new Intl.NumberFormat('zh-TW');
+const dateTimeFormatter = new Intl.DateTimeFormat('zh-TW', {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+    timeZone: 'Asia/Taipei'
+});
+const logTimeFormatter = new Intl.DateTimeFormat('zh-TW', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Taipei'
+});
 const PLACEHOLDER_IMAGE = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
         <rect width="400" height="400" fill="#f1f3f5"/>
@@ -42,18 +58,18 @@ async function checkAuthStatus() {
 
 // 顯示登入表單
 function showLoginForm() {
-    document.getElementById('loginContainer').style.display = 'block';
-    document.getElementById('mainContainer').style.display = 'none';
-    document.getElementById('userInfo').style.display = 'none';
-    document.getElementById('logoutBtn').style.display = 'none';
+    document.getElementById('loginContainer').hidden = false;
+    document.getElementById('mainContainer').hidden = true;
+    document.getElementById('userInfo').hidden = true;
+    document.getElementById('logoutBtn').hidden = true;
 }
 
 // 顯示主要內容
 function showMainContent() {
-    document.getElementById('loginContainer').style.display = 'none';
-    document.getElementById('mainContainer').style.display = 'block';
-    document.getElementById('userInfo').style.display = 'inline';
-    document.getElementById('logoutBtn').style.display = 'inline-block';
+    document.getElementById('loginContainer').hidden = true;
+    document.getElementById('mainContainer').hidden = false;
+    document.getElementById('userInfo').hidden = false;
+    document.getElementById('logoutBtn').hidden = false;
     document.getElementById('username').textContent = '2518995';
 }
 
@@ -67,11 +83,11 @@ async function handleLogin(event) {
     const loginError = document.getElementById('loginError');
     
     // 清除之前的錯誤訊息
-    loginError.style.display = 'none';
+    loginError.hidden = true;
     
     // 顯示載入狀態
     loginBtn.disabled = true;
-    loginBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> 登入中...';
+    loginBtn.innerHTML = '<i class="bi bi-hourglass-split" aria-hidden="true"></i> 登入中…';
     
     try {
         const response = await axios.post('/api/login', {
@@ -95,11 +111,11 @@ async function handleLogin(event) {
         }
         
         loginError.textContent = errorMessage;
-        loginError.style.display = 'block';
+        loginError.hidden = false;
     } finally {
         // 恢復按鈕狀態
         loginBtn.disabled = false;
-        loginBtn.innerHTML = '<i class="bi bi-box-arrow-in-right"></i> 登入';
+        loginBtn.innerHTML = '<i class="bi bi-box-arrow-in-right" aria-hidden="true"></i> 登入';
     }
 }
 
@@ -143,6 +159,8 @@ function setupEventListeners() {
     document.getElementById('smartRefreshBtn')?.addEventListener('click', event => refreshProducts(event, false));
     document.getElementById('fullRefreshBtn')?.addEventListener('click', event => refreshProducts(event, true));
     document.getElementById('clearLogsBtn')?.addEventListener('click', clearUpdateLogs);
+    document.getElementById('previousPageBtn')?.addEventListener('click', () => changePage(-1));
+    document.getElementById('nextPageBtn')?.addEventListener('click', () => changePage(1));
 
     // 自動更新開關
     const autoRefreshToggle = document.getElementById('autoRefresh');
@@ -235,7 +253,7 @@ async function refreshProducts(event, force = false) {
 
     const refreshBtn = event.currentTarget || event.target;
     refreshBtn.disabled = true;
-    refreshBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${force ? '完整更新中...' : '輕量檢查中...'}`;
+    refreshBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>${force ? '完整更新中…' : '輕量檢查中…'}`;
     
     try {
         // 使用智能更新端點，傳送當前選擇的賣場
@@ -266,52 +284,71 @@ async function refreshProducts(event, force = false) {
     } finally {
         refreshBtn.disabled = false;
         refreshBtn.innerHTML = force
-            ? '<i class="bi bi-arrow-repeat"></i> 完整更新'
-            : '<i class="bi bi-brain"></i> 輕量檢查';
+            ? '<i class="bi bi-arrow-repeat" aria-hidden="true"></i> 完整更新'
+            : '<i class="bi bi-brain" aria-hidden="true"></i> 輕量檢查';
     }
 }
 
 // 顯示商品列表
 function displayProducts(products) {
+    currentPage = 1;
+    renderProductPage(products);
+}
+
+function renderProductPage(products) {
     const tbody = document.getElementById('productsTableBody');
     const noDataMessage = document.getElementById('noDataMessage');
     const productsTable = document.getElementById('productsTable');
+    const pagination = document.getElementById('productPagination');
     
     if (!tbody) return;
-    
-    // 清空表格
     tbody.replaceChildren();
     
     if (products.length === 0) {
-        productsTable.style.display = 'none';
-        noDataMessage.style.display = 'block';
+        productsTable.hidden = true;
+        noDataMessage.hidden = false;
+        pagination.hidden = true;
         return;
     }
     
-    productsTable.style.display = 'table';
-    noDataMessage.style.display = 'none';
+    const totalPages = Math.ceil(products.length / PRODUCTS_PER_PAGE);
+    currentPage = Math.min(Math.max(currentPage, 1), totalPages);
+    const pageStart = (currentPage - 1) * PRODUCTS_PER_PAGE;
+    const pageProducts = products.slice(pageStart, pageStart + PRODUCTS_PER_PAGE);
+
+    productsTable.hidden = false;
+    noDataMessage.hidden = true;
+    pagination.hidden = totalPages <= 1;
+    updatePagination(products.length, totalPages, pageStart, pageProducts.length);
     
-    // 建立商品列
-    products.forEach(product => {
+    const fragment = document.createDocumentFragment();
+    pageProducts.forEach(product => {
         const row = document.createElement('tr');
         row.className = 'fade-in';
 
         const imageCell = document.createElement('td');
+        const imageButton = document.createElement('button');
+        imageButton.type = 'button';
+        imageButton.className = 'product-image-button';
+        imageButton.setAttribute('aria-label', `查看「${String(product.name || '商品')}」詳情`);
         const image = document.createElement('img');
         image.src = safeHttpUrl(product.imageUrl, PLACEHOLDER_IMAGE);
         image.alt = String(product.name || '商品圖片');
         image.className = 'product-img-mobile';
+        image.width = 100;
+        image.height = 100;
         image.loading = 'lazy';
         image.decoding = 'async';
         image.addEventListener('error', () => {
             if (image.src !== PLACEHOLDER_IMAGE) image.src = PLACEHOLDER_IMAGE;
         }, { once: true });
-        image.addEventListener('click', () => showProductDetail(product));
-        imageCell.appendChild(image);
+        imageButton.addEventListener('click', () => showProductDetail(product));
+        imageButton.appendChild(image);
+        imageCell.appendChild(imageButton);
 
         const priceCell = document.createElement('td');
         priceCell.className = 'price-tag-mobile';
-        priceCell.textContent = `NT$ ${Number(product.price || 0).toLocaleString('zh-TW')}`;
+        priceCell.textContent = `NT$ ${numberFormatter.format(Number(product.price || 0))}`;
 
         const nameCell = document.createElement('td');
         const productName = document.createElement('div');
@@ -321,12 +358,15 @@ function displayProducts(products) {
         nameCell.appendChild(productName);
 
         const actionsCell = document.createElement('td');
+        actionsCell.className = 'product-actions';
         const detailButton = document.createElement('button');
         detailButton.type = 'button';
-        detailButton.className = 'btn btn-sm btn-outline-primary me-1';
-        detailButton.setAttribute('aria-label', '查看商品詳情');
+        detailButton.className = 'btn btn-sm btn-outline-primary';
+        detailButton.setAttribute('aria-label', `查看「${String(product.name || '商品')}」詳情`);
+        detailButton.title = '查看商品詳情';
         const detailIcon = document.createElement('i');
         detailIcon.className = 'bi bi-eye';
+        detailIcon.setAttribute('aria-hidden', 'true');
         detailButton.appendChild(detailIcon);
         detailButton.addEventListener('click', () => showProductDetail(product));
         actionsCell.appendChild(detailButton);
@@ -338,16 +378,44 @@ function displayProducts(products) {
             productLink.target = '_blank';
             productLink.rel = 'noopener noreferrer';
             productLink.className = 'btn btn-sm btn-outline-secondary';
-            productLink.setAttribute('aria-label', '開啟原始商品頁面');
+            productLink.setAttribute('aria-label', `開啟「${String(product.name || '商品')}」原始頁面`);
+            productLink.title = '開啟原始商品頁面';
             const linkIcon = document.createElement('i');
             linkIcon.className = 'bi bi-box-arrow-up-right';
+            linkIcon.setAttribute('aria-hidden', 'true');
             productLink.appendChild(linkIcon);
             actionsCell.appendChild(productLink);
         }
 
         row.append(imageCell, priceCell, nameCell, actionsCell);
-        
-        tbody.appendChild(row);
+        fragment.appendChild(row);
+    });
+    tbody.appendChild(fragment);
+}
+
+function updatePagination(totalProducts, totalPages, pageStart, pageSize) {
+    const previousButton = document.getElementById('previousPageBtn');
+    const nextButton = document.getElementById('nextPageBtn');
+    const status = document.getElementById('paginationStatus');
+
+    previousButton.disabled = currentPage <= 1;
+    nextButton.disabled = currentPage >= totalPages;
+    const firstItem = pageStart + 1;
+    const lastItem = pageStart + pageSize;
+    status.textContent = `第 ${currentPage}／${totalPages} 頁（${numberFormatter.format(firstItem)}–${numberFormatter.format(lastItem)}，共 ${numberFormatter.format(totalProducts)} 件）`;
+}
+
+function changePage(offset) {
+    const totalPages = Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE);
+    const targetPage = Math.min(Math.max(currentPage + offset, 1), totalPages);
+    if (targetPage === currentPage) return;
+
+    currentPage = targetPage;
+    renderProductPage(filteredProducts);
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.getElementById('productsSection')?.scrollIntoView({
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+        block: 'start'
     });
 }
 
@@ -388,21 +456,17 @@ function showProductDetail(product) {
         modalImage.onerror = null;
         modalImage.src = PLACEHOLDER_IMAGE;
     };
+    modalImage.alt = String(product.name || '商品圖片');
     document.getElementById('modalTitle').textContent = String(product.name || '');
-    // 移除商品編號顯示
-    const modalIdElement = document.getElementById('modalId');
-    if (modalIdElement) {
-        modalIdElement.parentElement.style.display = 'none';
-    }
-    document.getElementById('modalPrice').textContent = Number(product.price || 0).toLocaleString('zh-TW');
+    document.getElementById('modalPrice').textContent = numberFormatter.format(Number(product.price || 0));
     const modalLink = document.getElementById('modalLink');
     const productUrl = safeHttpUrl(product.url, null);
     modalLink.href = productUrl || '#';
-    modalLink.style.display = productUrl ? 'inline-block' : 'none';
+    modalLink.hidden = !productUrl;
     modalLink.rel = 'noopener noreferrer';
     
     // 顯示 Modal
-    const modal = new bootstrap.Modal(document.getElementById('productModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('productModal'));
     modal.show();
 }
 
@@ -412,16 +476,20 @@ function updateStatistics(data) {
     const updateTime = document.getElementById('updateTime');
     
     if (totalProducts) {
-        totalProducts.textContent = data.total || 0;
+        totalProducts.textContent = numberFormatter.format(data.total || 0);
     }
     
     if (updateTime && data.lastUpdate) {
         const date = new Date(data.lastUpdate);
-        updateTime.textContent = date.toLocaleString('zh-TW');
+        updateTime.dateTime = date.toISOString();
+        updateTime.textContent = dateTimeFormatter.format(date);
+    } else if (updateTime) {
+        updateTime.removeAttribute('datetime');
+        updateTime.textContent = '-';
     }
     
     // 更新圖片統計
-    updateImageStatistics(data.products || []);
+    updateImageStatistics(data.products || [], data.imageStats);
 }
 
 // 更新最後更新時間
@@ -431,7 +499,7 @@ function updateLastUpdateTime(lastUpdate) {
     if (lastUpdateElement && lastUpdate) {
         const date = new Date(lastUpdate);
         const now = new Date();
-        const diff = Math.floor((now - date) / 1000); // 秒數差
+        const diff = Math.max(0, Math.floor((now - date) / 1000)); // 秒數差
         
         let timeText = '';
         if (diff < 60) {
@@ -441,7 +509,7 @@ function updateLastUpdateTime(lastUpdate) {
         } else if (diff < 86400) {
             timeText = `${Math.floor(diff / 3600)} 小時前更新`;
         } else {
-            timeText = date.toLocaleString('zh-TW');
+            timeText = dateTimeFormatter.format(date);
         }
         
         lastUpdateElement.textContent = timeText;
@@ -455,12 +523,14 @@ function showLoading(show) {
     const noDataMessage = document.getElementById('noDataMessage');
     
     if (loadingSpinner) {
-        loadingSpinner.style.display = show ? 'block' : 'none';
+        loadingSpinner.hidden = !show;
     }
     
     if (show) {
-        if (productsTable) productsTable.style.display = 'none';
-        if (noDataMessage) noDataMessage.style.display = 'none';
+        if (productsTable) productsTable.hidden = true;
+        if (noDataMessage) noDataMessage.hidden = true;
+        const pagination = document.getElementById('productPagination');
+        if (pagination) pagination.hidden = true;
     }
 }
 
@@ -469,11 +539,11 @@ function showError(message) {
     const errorMessage = document.getElementById('errorMessage');
     if (errorMessage) {
         errorMessage.textContent = message;
-        errorMessage.style.display = 'block';
+        errorMessage.hidden = false;
         
         // 5秒後自動隱藏
         setTimeout(() => {
-            errorMessage.style.display = 'none';
+            errorMessage.hidden = true;
         }, 5000);
     }
 }
@@ -482,7 +552,7 @@ function showError(message) {
 function hideError() {
     const errorMessage = document.getElementById('errorMessage');
     if (errorMessage) {
-        errorMessage.style.display = 'none';
+        errorMessage.hidden = true;
     }
 }
 
@@ -490,10 +560,12 @@ function hideError() {
 function showSuccess(message) {
     // 建立成功訊息元素
     const successDiv = document.createElement('div');
-    successDiv.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
-    successDiv.style.zIndex = '9999';
+    successDiv.className = 'app-toast alert alert-success alert-dismissible fade show position-fixed start-50 translate-middle-x';
+    successDiv.setAttribute('role', 'status');
+    successDiv.setAttribute('aria-live', 'polite');
     const icon = document.createElement('i');
     icon.className = 'bi bi-check-circle me-2';
+    icon.setAttribute('aria-hidden', 'true');
     const messageNode = document.createTextNode(String(message));
     const closeButton = document.createElement('button');
     closeButton.type = 'button';
@@ -511,13 +583,17 @@ function showSuccess(message) {
 }
 
 // 更新圖片統計
-function updateImageStatistics(products) {
+function updateImageStatistics(products, serverStats = null) {
     const imageStatsElement = document.getElementById('imageStats');
     if (!imageStatsElement) return;
     
-    const totalProducts = products.length;
-    const productsWithImages = products.filter(p => p.imageUrl && p.imageUrl.trim() !== '').length;
-    const successRate = totalProducts > 0 ? ((productsWithImages / totalProducts) * 100).toFixed(1) : 0;
+    const totalProducts = serverStats ? Number(serverStats.withImages) + Number(serverStats.withoutImages) : products.length;
+    const productsWithImages = serverStats
+        ? Number(serverStats.withImages)
+        : products.filter(p => p.imageUrl && p.imageUrl.trim() !== '').length;
+    const successRate = serverStats
+        ? Number.parseFloat(serverStats.successRate) || 0
+        : (totalProducts > 0 ? ((productsWithImages / totalProducts) * 100).toFixed(1) : 0);
     
     // 根據成功率設定顏色
     let colorClass = 'text-success';
@@ -528,7 +604,7 @@ function updateImageStatistics(products) {
     }
     
     imageStatsElement.className = `fw-bold ${colorClass}`;
-    imageStatsElement.textContent = `${productsWithImages}/${totalProducts} (${successRate}%)`;
+    imageStatsElement.textContent = `${numberFormatter.format(productsWithImages)}/${numberFormatter.format(totalProducts)} (${Number(successRate).toFixed(1)}%)`;
 }
 
 // 載入更新日誌
@@ -558,12 +634,7 @@ function renderUpdateLogs(logs) {
 
     const fragment = document.createDocumentFragment();
     logs.forEach(log => {
-        const timestamp = new Date(log.timestamp).toLocaleString('zh-TW', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        const timestamp = logTimeFormatter.format(new Date(log.timestamp));
         
         const entry = document.createElement('div');
         const safeType = ['info', 'success', 'warning', 'error', 'new', 'modified', 'removed'].includes(log.type)
@@ -688,14 +759,13 @@ function searchProducts(searchTerm) {
 function updateSearchResultsInfo(searchTerm, resultCount, totalCount) {
     let searchInfo = document.getElementById('searchResultsInfo');
     if (!searchInfo) {
-        // 如果不存在，創建一個
         searchInfo = document.createElement('div');
         searchInfo.id = 'searchResultsInfo';
-        searchInfo.className = 'alert alert-info py-2 px-3 mb-3';
-        searchInfo.style.display = 'none';
-        
-        const searchContainer = document.querySelector('.row.mb-3');
-        searchContainer.insertAdjacentElement('afterend', searchInfo);
+        searchInfo.className = 'alert alert-info py-2 px-3 mb-0';
+        searchInfo.setAttribute('role', 'status');
+        searchInfo.setAttribute('aria-live', 'polite');
+        searchInfo.hidden = true;
+        document.getElementById('searchResultsAnchor')?.appendChild(searchInfo);
     }
     
     if (searchTerm.trim()) {
@@ -709,9 +779,9 @@ function updateSearchResultsInfo(searchTerm, resultCount, totalCount) {
             suggestion.textContent = '試試其他關鍵字或價格範圍';
             searchInfo.appendChild(suggestion);
         }
-        searchInfo.style.display = 'block';
+        searchInfo.hidden = false;
     } else {
-        searchInfo.style.display = 'none';
+        searchInfo.hidden = true;
     }
 }
 
@@ -719,17 +789,19 @@ function updateSearchResultsInfo(searchTerm, resultCount, totalCount) {
 function initializeSearch() {
     const searchNameInput = document.getElementById('searchNameInput');
     const searchPriceInput = document.getElementById('searchPriceInput');
+    const scheduleSearch = () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(searchProducts, 120);
+    };
     
     // 品名搜尋
     if (searchNameInput) {
-        // 即時搜尋（輸入時立即搜尋）
-        searchNameInput.addEventListener('input', function(e) {
-            searchProducts();
-        });
+        searchNameInput.addEventListener('input', scheduleSearch);
         
         // 按Enter鍵搜尋
-        searchNameInput.addEventListener('keypress', function(e) {
+        searchNameInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
+                clearTimeout(searchTimer);
                 searchProducts();
             }
         });
@@ -737,14 +809,12 @@ function initializeSearch() {
     
     // 價格搜尋
     if (searchPriceInput) {
-        // 即時搜尋（輸入時立即搜尋）
-        searchPriceInput.addEventListener('input', function(e) {
-            searchProducts();
-        });
+        searchPriceInput.addEventListener('input', scheduleSearch);
         
         // 按Enter鍵搜尋
-        searchPriceInput.addEventListener('keypress', function(e) {
+        searchPriceInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
+                clearTimeout(searchTimer);
                 searchProducts();
             }
         });
@@ -791,7 +861,7 @@ async function switchStore(storeType) {
     // 隱藏搜尋結果提示
     const searchInfo = document.getElementById('searchResultsInfo');
     if (searchInfo) {
-        searchInfo.style.display = 'none';
+        searchInfo.hidden = true;
     }
     
     // 顯示載入狀態
@@ -881,9 +951,11 @@ function showLoadingState() {
     const productsTable = document.getElementById('productsTable');
     const noDataMessage = document.getElementById('noDataMessage');
     
-    if (loadingSpinner) loadingSpinner.style.display = 'block';
-    if (productsTable) productsTable.style.display = 'none';
-    if (noDataMessage) noDataMessage.style.display = 'none';
+    if (loadingSpinner) loadingSpinner.hidden = false;
+    if (productsTable) productsTable.hidden = true;
+    if (noDataMessage) noDataMessage.hidden = true;
+    const pagination = document.getElementById('productPagination');
+    if (pagination) pagination.hidden = true;
     
     // 重置統計資訊
     updateStatistics({
@@ -896,7 +968,7 @@ function showLoadingState() {
 // 隱藏載入狀態
 function hideLoadingState() {
     const loadingSpinner = document.getElementById('loadingSpinner');
-    if (loadingSpinner) loadingSpinner.style.display = 'none';
+    if (loadingSpinner) loadingSpinner.hidden = true;
 }
 
 // 匯出Excel
@@ -905,7 +977,7 @@ async function exportExcel(event) {
     const originalText = exportBtn.innerHTML;
     
     exportBtn.disabled = true;
-    exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>匯出中...';
+    exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>匯出中…';
     
     try {
         const storeData = getStoreData(currentStore);

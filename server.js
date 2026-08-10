@@ -125,7 +125,8 @@ function parseStore(value, fallback = 'yuanzhengshan') {
 }
 
 function buildDataVersion(storeType, stats) {
-    const timestamp = stats.lastUpdate ? new Date(stats.lastUpdate).getTime() : 0;
+    const changedAt = stats.dataChangedAt || stats.lastUpdate;
+    const timestamp = changedAt ? new Date(changedAt).getTime() : 0;
     return `${storeType}:${stats.total || 0}:${timestamp}`;
 }
 

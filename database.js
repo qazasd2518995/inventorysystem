@@ -22,6 +22,57 @@ if (databaseNeedsSsl && process.env.DB_SSL !== 'false') {
 
 const pool = new Pool(poolConfig);
 
+const TIMESTAMP_MIGRATIONS = [
+    {
+        table: 'products',
+        columns: ['scraped_at', 'updated_at'],
+        // 舊商品時間可能由台北本機或 UTC Render 寫入。只有明顯晚於資料庫現在時間的值
+        // 才視為台北牆上時間，避免把既有 UTC 資料全部錯移八小時。
+        using: column => `CASE
+            WHEN ${column} > LOCALTIMESTAMP + INTERVAL '5 minutes'
+                THEN ${column} AT TIME ZONE 'Asia/Taipei'
+            ELSE ${column} AT TIME ZONE 'UTC'
+        END`
+    },
+    {
+        table: 'update_logs',
+        columns: ['created_at'],
+        using: column => `${column} AT TIME ZONE 'UTC'`
+    },
+    {
+        table: 'product_price_history',
+        columns: ['changed_at'],
+        using: column => `${column} AT TIME ZONE 'UTC'`
+    },
+    {
+        table: 'sync_state',
+        columns: ['last_started_at', 'last_success_at', 'last_failed_at', 'updated_at'],
+        using: column => `${column} AT TIME ZONE 'UTC'`
+    }
+];
+
+async function migrateTimestampColumns(client) {
+    const legacyColumns = await client.query(`
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND data_type = 'timestamp without time zone'
+    `);
+    const legacyKeys = new Set(legacyColumns.rows.map(row => `${row.table_name}.${row.column_name}`));
+
+    for (const migration of TIMESTAMP_MIGRATIONS) {
+        for (const column of migration.columns) {
+            if (!legacyKeys.has(`${migration.table}.${column}`)) continue;
+            console.log(`🕒 升級 ${migration.table}.${column} 為含時區時間...`);
+            await client.query(`
+                ALTER TABLE ${migration.table}
+                ALTER COLUMN ${column} TYPE TIMESTAMPTZ
+                USING (${migration.using(column)})
+            `);
+        }
+    }
+}
+
 // 初始化資料庫表結構
 async function initializeDatabase() {
     const client = await pool.connect();
@@ -93,8 +144,8 @@ async function initializeDatabase() {
                         price INTEGER DEFAULT 0,
                         image_url TEXT,
                         product_url TEXT,
-                        scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                         is_active BOOLEAN DEFAULT TRUE,
                         PRIMARY KEY (id, store_type)
                     )
@@ -111,7 +162,7 @@ async function initializeDatabase() {
                 type VARCHAR(20) NOT NULL,
                 message TEXT NOT NULL,
                 details JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
@@ -123,7 +174,7 @@ async function initializeDatabase() {
                 store_type VARCHAR(20) NOT NULL,
                 old_price INTEGER NOT NULL,
                 new_price INTEGER NOT NULL,
-                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                changed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
@@ -131,14 +182,16 @@ async function initializeDatabase() {
         await client.query(`
             CREATE TABLE IF NOT EXISTS sync_state (
                 store_type VARCHAR(20) PRIMARY KEY,
-                last_started_at TIMESTAMP,
-                last_success_at TIMESTAMP,
-                last_failed_at TIMESTAMP,
+                last_started_at TIMESTAMPTZ,
+                last_success_at TIMESTAMPTZ,
+                last_failed_at TIMESTAMPTZ,
                 last_error TEXT,
                 last_result JSONB,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        await migrateTimestampColumns(client);
         
         // 創建索引以提升查詢效能
         await client.query(`
@@ -308,7 +361,11 @@ async function getProductStats(storeType = null) {
                     COUNT(*) as total,
                     COUNT(CASE WHEN image_url IS NOT NULL AND image_url != '' THEN 1 END) as with_images,
                     COUNT(CASE WHEN image_url IS NULL OR image_url = '' THEN 1 END) as without_images,
-                    MAX(updated_at) as last_update
+                    COALESCE(
+                        (SELECT last_success_at FROM sync_state WHERE store_type = $1),
+                        MAX(updated_at)
+                    ) as last_update,
+                    MAX(updated_at) as data_changed_at
                 FROM products 
                 WHERE is_active = TRUE AND store_type = $1
             `, [storeType]);
@@ -322,20 +379,23 @@ async function getProductStats(storeType = null) {
                 withImages: parseInt(stats.with_images),
                 withoutImages: parseInt(stats.without_images),
                 imageSuccessRate: `${imageSuccessRate}%`,
-                lastUpdate: stats.last_update
+                lastUpdate: stats.last_update,
+                dataChangedAt: stats.data_changed_at
             };
         } else {
             // 所有商店統計
             const result = await client.query(`
                 SELECT 
-                    store_type,
+                    products.store_type,
                     COUNT(*) as total,
                     COUNT(CASE WHEN image_url IS NOT NULL AND image_url != '' THEN 1 END) as with_images,
                     COUNT(CASE WHEN image_url IS NULL OR image_url = '' THEN 1 END) as without_images,
-                    MAX(updated_at) as last_update
-                FROM products 
-                WHERE is_active = TRUE 
-                GROUP BY store_type
+                    COALESCE(MAX(sync_state.last_success_at), MAX(products.updated_at)) as last_update,
+                    MAX(products.updated_at) as data_changed_at
+                FROM products
+                LEFT JOIN sync_state ON sync_state.store_type = products.store_type
+                WHERE is_active = TRUE
+                GROUP BY products.store_type
             `);
             
             const stats = {
@@ -344,7 +404,8 @@ async function getProductStats(storeType = null) {
                 youmao: 0,
                 withImages: 0,
                 withoutImages: 0,
-                lastUpdate: null
+                lastUpdate: null,
+                dataChangedAt: null
             };
             
             result.rows.forEach(row => {
@@ -358,6 +419,9 @@ async function getProductStats(storeType = null) {
                 
                 if (!stats.lastUpdate || (row.last_update && row.last_update > stats.lastUpdate)) {
                     stats.lastUpdate = row.last_update;
+                }
+                if (!stats.dataChangedAt || (row.data_changed_at && row.data_changed_at > stats.dataChangedAt)) {
+                    stats.dataChangedAt = row.data_changed_at;
                 }
             });
             

@@ -2,238 +2,223 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0d6efd">
     <title>源正山・友茂工具 - 網拍商品管理系統</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-primary">
-        <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1">
-                <i class="bi bi-shop"></i> 源正山・友茂工具 - 網拍商品管理系統
-            </span>
-            <div class="d-flex align-items-center text-white">
-                <span id="userInfo" class="me-3" style="display: none;">
-                    <i class="bi bi-person-circle"></i> <span id="username"></span>
-                </span>
-                <span id="lastUpdate" class="me-3">尚未更新</span>
+    <a class="skip-link" href="#mainContent">跳到主要內容</a>
 
-                <button id="logoutBtn" class="btn btn-outline-light" style="display: none;">
-                    <i class="bi bi-box-arrow-right"></i> 登出
+    <nav class="navbar navbar-dark bg-primary" aria-label="主要導覽列">
+        <div class="container-fluid navbar-content">
+            <h1 class="navbar-brand mb-0">
+                <i class="bi bi-shop" aria-hidden="true"></i>
+                <span>源正山・友茂工具</span>
+                <span class="brand-suffix">網拍商品管理系統</span>
+            </h1>
+            <div class="navbar-meta text-white">
+                <span id="userInfo" hidden>
+                    <i class="bi bi-person-circle" aria-hidden="true"></i>
+                    <span id="username"></span>
+                </span>
+                <span id="lastUpdate" role="status" aria-live="polite">尚未更新</span>
+                <button id="logoutBtn" class="btn btn-outline-light" type="button" hidden>
+                    <i class="bi bi-box-arrow-right" aria-hidden="true"></i> 登出
                 </button>
             </div>
         </div>
     </nav>
 
-    <!-- 登入界面 -->
-    <div id="loginContainer" class="container-fluid mt-5">
-        <div class="row justify-content-center">
-            <div class="col-md-4">
-                <div class="card shadow">
-                    <div class="card-body">
-                        <div class="text-center mb-4">
-                            <i class="bi bi-shield-lock" style="font-size: 3rem; color: #0d6efd;"></i>
-                            <h3 class="mt-2">系統登入</h3>
-                            <p class="text-muted">請輸入帳號密碼以存取管理系統</p>
-                        </div>
-                        <form id="loginForm">
-                            <div class="mb-3">
-                                <label for="loginUsername" class="form-label">帳號</label>
-                                <div class="input-group">
-                                    <span class="input-group-text"><i class="bi bi-person"></i></span>
-                                    <input type="text" class="form-control" id="loginUsername" required>
-                                </div>
+    <main id="mainContent">
+        <div id="loginContainer" class="container-fluid login-container">
+            <div class="row justify-content-center">
+                <div class="col-sm-10 col-md-6 col-lg-4">
+                    <div class="card shadow">
+                        <div class="card-body login-card-body">
+                            <div class="text-center mb-4">
+                                <i class="bi bi-shield-lock login-icon" aria-hidden="true"></i>
+                                <h2 class="h3 mt-2">系統登入</h2>
+                                <p class="text-muted">請輸入帳號密碼以存取管理系統</p>
                             </div>
-                            <div class="mb-3">
-                                <label for="loginPassword" class="form-label">密碼</label>
-                                <div class="input-group">
-                                    <span class="input-group-text"><i class="bi bi-lock"></i></span>
-                                    <input type="password" class="form-control" id="loginPassword" required>
+                            <form id="loginForm">
+                                <div class="mb-3">
+                                    <label for="loginUsername" class="form-label">帳號</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text"><i class="bi bi-person" aria-hidden="true"></i></span>
+                                        <input type="text" class="form-control" id="loginUsername" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+                                    </div>
                                 </div>
-                            </div>
-                            <div id="loginError" class="alert alert-danger" style="display: none;"></div>
-                            <button type="submit" class="btn btn-primary w-100" id="loginBtn">
-                                <i class="bi bi-box-arrow-in-right"></i> 登入
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 主要內容區域 -->
-    <div id="mainContainer" class="container-fluid mt-4" style="display: none;">
-        <!-- 賣場選擇器 -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="card border-primary">
-                    <div class="card-body py-3">
-                        <div class="d-flex align-items-center justify-content-between">
-                            <div class="d-flex align-items-center">
-                                <i class="bi bi-shop me-2" style="font-size: 1.5rem; color: #0d6efd;"></i>
-                                <h5 class="mb-0 me-3">選擇賣場：</h5>
-                                <div class="btn-group" role="group">
-                                    <input type="radio" class="btn-check" name="storeSelector" id="store-yuanzhengshan" value="yuanzhengshan" checked>
-                                    <label class="btn btn-outline-primary" for="store-yuanzhengshan">
-                                        <i class="bi bi-building"></i> 源正山（Yahoo／外匯嚴選）
-                                    </label>
-                                    
-                                    <input type="radio" class="btn-check" name="storeSelector" id="store-youmao" value="youmao">
-                                    <label class="btn btn-outline-primary" for="store-youmao">
-                                        <i class="bi bi-tools"></i> 友茂工具（露天）
-                                    </label>
+                                <div class="mb-3">
+                                    <label for="loginPassword" class="form-label">密碼</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text"><i class="bi bi-lock" aria-hidden="true"></i></span>
+                                        <input type="password" class="form-control" id="loginPassword" name="password" autocomplete="current-password" required>
+                                    </div>
                                 </div>
-                            </div>
-
+                                <div id="loginError" class="alert alert-danger" role="alert" aria-live="assertive" hidden></div>
+                                <button type="submit" class="btn btn-primary w-100" id="loginBtn">
+                                    <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i> 登入
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-        
-        <div class="row mb-3">
-            <div class="col-md-6">
-                <div class="card">
+
+        <div id="mainContainer" class="container-fluid main-container" hidden>
+            <section class="card border-primary store-card" aria-labelledby="storeSelectorTitle">
+                <div class="card-body">
+                    <fieldset class="store-selector">
+                        <legend id="storeSelectorTitle" class="h5 store-selector-title">
+                            <i class="bi bi-shop" aria-hidden="true"></i> 選擇賣場
+                        </legend>
+                        <div class="store-options">
+                            <input type="radio" class="btn-check" name="storeSelector" id="store-yuanzhengshan" value="yuanzhengshan" checked>
+                            <label class="btn btn-outline-primary" for="store-yuanzhengshan">
+                                <i class="bi bi-building" aria-hidden="true"></i> 源正山（Yahoo／外匯嚴選）
+                            </label>
+
+                            <input type="radio" class="btn-check" name="storeSelector" id="store-youmao" value="youmao">
+                            <label class="btn btn-outline-primary" for="store-youmao">
+                                <i class="bi bi-tools" aria-hidden="true"></i> 友茂工具（露天）
+                            </label>
+                        </div>
+                    </fieldset>
+                </div>
+            </section>
+
+            <div class="dashboard-grid">
+                <section class="card" aria-labelledby="statisticsTitle">
                     <div class="card-body">
-                        <h5 class="card-title">商品統計</h5>
-                        <div class="row">
-                            <div class="col-6">
+                        <h2 id="statisticsTitle" class="card-title h5">商品統計</h2>
+                        <div class="statistics-grid">
+                            <div>
                                 <p class="mb-1">總商品數：<span id="totalProducts" class="fw-bold">0</span> 件</p>
                                 <p class="mb-0 small">圖片狀態：<span id="imageStats" class="fw-bold text-success">-</span></p>
                             </div>
-                            <div class="col-6">
-                                <p class="mb-0">最後更新：<span id="updateTime" class="fw-bold">-</span></p>
+                            <p class="mb-0">最後更新：<time id="updateTime" class="fw-bold">-</time></p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card" aria-labelledby="actionsTitle">
+                    <div class="card-body">
+                        <h2 id="actionsTitle" class="card-title h5">操作功能</h2>
+                        <div class="action-grid">
+                            <button id="exportBtn" class="btn btn-success" type="button">
+                                <i class="bi bi-file-earmark-excel" aria-hidden="true"></i> 匯出 Excel
+                            </button>
+                            <button id="smartRefreshBtn" class="btn btn-primary" type="button">
+                                <i class="bi bi-brain" aria-hidden="true"></i> 輕量檢查
+                            </button>
+                            <button id="fullRefreshBtn" class="btn btn-outline-warning" type="button">
+                                <i class="bi bi-arrow-repeat" aria-hidden="true"></i> 完整更新
+                            </button>
+                            <div class="form-check form-switch auto-refresh-control">
+                                <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
+                                <label class="form-check-label" for="autoRefresh">資料變更時自動重新載入</label>
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">操作功能</h5>
-                        <button id="exportBtn" class="btn btn-success me-2">
-                            <i class="bi bi-file-earmark-excel"></i> 匯出 Excel
-                        </button>
-                        <button id="smartRefreshBtn" class="btn btn-primary me-2">
-                            <i class="bi bi-brain"></i> 輕量檢查
-                        </button>
-                        <button id="fullRefreshBtn" class="btn btn-outline-warning me-2">
-                            <i class="bi bi-arrow-repeat"></i> 完整更新
-                        </button>
-                        <div class="form-check form-switch d-inline-block">
-                            <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
-                            <label class="form-check-label" for="autoRefresh">
-                                資料變更時自動重新載入
-                            </label>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
 
-        <div class="row mb-3">
-            <div class="col-md-4">
+            <section class="control-grid" aria-label="搜尋與日誌">
                 <div class="input-group">
-                    <span class="input-group-text"><i class="bi bi-search"></i> 品名</span>
-                    <input type="text" class="form-control" id="searchNameInput" placeholder="搜尋商品名稱...">
+                    <label class="input-group-text" for="searchNameInput"><i class="bi bi-search" aria-hidden="true"></i> 品名</label>
+                    <input type="search" class="form-control" id="searchNameInput" name="product-name" autocomplete="off" placeholder="搜尋商品名稱…">
                 </div>
-            </div>
-            <div class="col-md-4">
                 <div class="input-group">
-                    <span class="input-group-text"><i class="bi bi-currency-dollar"></i> 價格</span>
-                    <input type="text" class="form-control" id="searchPriceInput" placeholder="輸入價格 (如: 34800)">
+                    <label class="input-group-text" for="searchPriceInput"><i class="bi bi-currency-dollar" aria-hidden="true"></i> 價格</label>
+                    <input type="text" class="form-control" id="searchPriceInput" name="product-price" inputmode="numeric" autocomplete="off" placeholder="例如 34800">
                 </div>
-            </div>
-            <div class="col-md-4">
-                <button class="btn btn-outline-secondary w-100" type="button" data-bs-toggle="collapse" data-bs-target="#updateLogsCollapse">
-                    <i class="bi bi-clock-history"></i> 更新日誌
+                <button id="updateLogsToggle" class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#updateLogsCollapse" aria-controls="updateLogsCollapse" aria-expanded="false">
+                    <i class="bi bi-clock-history" aria-hidden="true"></i> 更新日誌
                 </button>
-            </div>
-        </div>
+            </section>
 
-        <!-- 更新日誌折疊區域 -->
-        <div class="row mb-3">
-            <div class="col-12">
-                <div class="collapse" id="updateLogsCollapse">
-                    <div class="card">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5 class="card-title mb-0">
-                                    <i class="bi bi-clock-history"></i> 更新日誌
-                                </h5>
-                                <button id="clearLogsBtn" class="btn btn-sm btn-outline-danger">
-                                    <i class="bi bi-trash"></i> 清除日誌
-                                </button>
-                            </div>
-                            <div id="updateLogsList" class="update-logs-container" style="max-height: 300px; overflow-y: auto;">
-                                <p class="text-muted text-center">暫無更新日誌</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+            <div id="searchResultsAnchor"></div>
 
-        <div class="row">
-            <div class="col-12">
+            <section class="collapse update-logs-section" id="updateLogsCollapse" aria-labelledby="updateLogsTitle">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">商品列表</h5>
-                        <div id="loadingSpinner" class="text-center py-5" style="display: none;">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">載入中...</span>
-                            </div>
-                            <p class="mt-2">正在載入商品資料...</p>
+                        <div class="section-heading-row">
+                            <h2 id="updateLogsTitle" class="card-title h5 mb-0">
+                                <i class="bi bi-clock-history" aria-hidden="true"></i> 更新日誌
+                            </h2>
+                            <button id="clearLogsBtn" class="btn btn-sm btn-outline-danger" type="button">
+                                <i class="bi bi-trash" aria-hidden="true"></i> 清除日誌
+                            </button>
                         </div>
-                        <div id="errorMessage" class="alert alert-danger" style="display: none;"></div>
-                        <div class="table-responsive">
-                            <table class="table table-hover" id="productsTable">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th style="width: 120px;">圖片</th>
-                                        <th style="width: 100px;">價格</th>
-                                        <th>商品名稱</th>
-                                        <th style="width: 80px;">操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="productsTableBody">
-                                    <!-- 商品資料將動態載入 -->
-                                </tbody>
-                            </table>
-                        </div>
-                        <div id="noDataMessage" class="text-center py-5" style="display: none;">
-                            <i class="bi bi-inbox" style="font-size: 3rem; color: #ccc;"></i>
-                            <p class="mt-2 text-muted">暫無商品資料</p>
+                        <div id="updateLogsList" class="update-logs-container" role="log" aria-live="polite">
+                            <p class="text-muted text-center">暫無更新日誌</p>
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
+            </section>
 
-    <!-- 商品詳情 Modal -->
-    <div class="modal fade" id="productModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+            <section id="productsSection" class="card products-card" aria-labelledby="productsTitle">
+                <div class="card-body">
+                    <h2 id="productsTitle" class="card-title h5">商品列表</h2>
+                    <div id="loadingSpinner" class="text-center py-5" role="status" aria-live="polite" hidden>
+                        <div class="spinner-border text-primary" aria-hidden="true"></div>
+                        <p class="mt-2">正在載入商品資料…</p>
+                    </div>
+                    <div id="errorMessage" class="alert alert-danger" role="alert" aria-live="assertive" hidden></div>
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="productsTable" aria-describedby="paginationStatus">
+                            <thead class="table-light">
+                                <tr>
+                                    <th scope="col">圖片</th>
+                                    <th scope="col">價格</th>
+                                    <th scope="col">商品名稱</th>
+                                    <th scope="col">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="productsTableBody"></tbody>
+                        </table>
+                    </div>
+                    <div id="noDataMessage" class="text-center py-5" hidden>
+                        <i class="bi bi-inbox no-data-icon" aria-hidden="true"></i>
+                        <p class="mt-2 text-muted">暫無商品資料</p>
+                    </div>
+                    <nav id="productPagination" class="product-pagination" aria-label="商品分頁" hidden>
+                        <button id="previousPageBtn" class="btn btn-outline-primary" type="button">
+                            <i class="bi bi-chevron-left" aria-hidden="true"></i> 上一頁
+                        </button>
+                        <span id="paginationStatus" role="status" aria-live="polite">第 1 頁</span>
+                        <button id="nextPageBtn" class="btn btn-outline-primary" type="button">
+                            下一頁 <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                        </button>
+                    </nav>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <div class="modal fade" id="productModal" tabindex="-1" aria-labelledby="productModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">商品詳情</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <h2 id="productModalLabel" class="modal-title h5">商品詳情</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="關閉商品詳情"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="row">
+                    <div class="row g-4">
                         <div class="col-md-6">
-                            <img id="modalImage" src="" alt="商品圖片" class="img-fluid">
+                            <img id="modalImage" src="" alt="商品圖片" class="img-fluid" width="400" height="400">
                         </div>
                         <div class="col-md-6">
-                            <h4 id="modalTitle"></h4>
-                            <p class="text-muted">商品編號：<span id="modalId"></span></p>
-                            <h3 class="text-danger">NT$ <span id="modalPrice"></span></h3>
-                            <a id="modalLink" href="" target="_blank" class="btn btn-primary mt-3">
-                                <i class="bi bi-box-arrow-up-right"></i> 查看原始頁面
+                            <h3 id="modalTitle" class="h4"></h3>
+                            <p class="text-muted" hidden>商品編號：<span id="modalId"></span></p>
+                            <p class="h3 text-danger modal-price">NT$ <span id="modalPrice"></span></p>
+                            <a id="modalLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary mt-3">
+                                <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> 查看原始頁面
                             </a>
                         </div>
                     </div>
