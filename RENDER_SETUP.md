@@ -1,36 +1,24 @@
+# Render 部署
 
-#14 exporting cache to client directory
-#14 preparing build cache for export
-#14 writing cache manifest sha256:41e4dd025cfc7b5cbcd8e6c193ccff8796650af1f2146dfd68dae057231f165f done
-#14 DONE 0.0s
-Pushing image to registry...
-Upload succeeded
-==> Deploying...
-> yahoo-auction-exporter@1.0.0 start
-> node server.js
-/app/server.js:1624
-        browser = await puppeteer.launch({
-                  ^^^^^
-SyntaxError: await is only valid in async functions and the top level bodies of modules
-    at wrapSafe (node:internal/modules/cjs/loader:1472:18)
-    at Module._compile (node:internal/modules/cjs/loader:1501:20)
-    at Module._extensions..js (node:internal/modules/cjs/loader:1613:10)
-    at Module.load (node:internal/modules/cjs/loader:1275:32)
-    at Module._load (node:internal/modules/cjs/loader:1096:12)
-    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)
-    at node:internal/main/run_main_module:28:49
-Node.js v20.19.4
-> yahoo-auction-exporter@1.0.0 start
-> node server.js
-/app/server.js:1624
-        browser = await puppeteer.launch({
-                  ^^^^^
-SyntaxError: await is only valid in async functions and the top level bodies of modules
-    at wrapSafe (node:internal/modules/cjs/loader:1472:18)
-    at Module._compile (node:internal/modules/cjs/loader:1501:20)
-    at Module._extensions..js (node:internal/modules/cjs/loader:1613:10)
-    at Module.load (node:internal/modules/cjs/loader:1275:32)
-    at Module._load (node:internal/modules/cjs/loader:1096:12)
-    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)
-    at node:internal/main/run_main_module:28:49
-Node.js v20.19.4
+Web Service 使用 Docker 部署，啟動命令為 `npm start`，健康檢查路徑為 `/api/health`。
+
+必要環境變數：
+
+- `NODE_ENV=production`
+- `DATABASE_URL` 或完整的 `DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`、`DB_PORT`
+- `DB_SSL=true`
+- `LOGIN_USERNAME`
+- `LOGIN_PASSWORD`
+- `SESSION_SECRET`
+- `COUNT_CHECK_TIMEOUT_MS=15000`
+- `RUTEN_SELLER_ID=1994160`
+- `RUTEN_API_TIMEOUT_MS=20000`
+- `RUTEN_REQUEST_DELAY_MS=100`
+
+Web Service 不在啟動時同步，避免免費實例每次休眠喚醒都重抓資料。若需要自動同步，請另外建立 Render Cron Job，命令使用：
+
+```bash
+npm run sync:scheduled
+```
+
+這個命令平日執行智慧同步，每週指定日做完整校對。Render Cron Job 會產生額外費用，建立前應先確認帳務方案。

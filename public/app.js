@@ -4,6 +4,7 @@ let filteredProducts = [];
 let autoRefreshInterval = null;
 let isAuthenticated = false;
 let currentStore = 'yuanzhengshan'; // 預設為源正山
+const dataVersions = {};
 
 // DOM 載入完成後初始化
 document.addEventListener('DOMContentLoaded', function() {
@@ -162,9 +163,9 @@ function setupAutoRefresh() {
         if (autoRefreshInterval) {
             clearInterval(autoRefreshInterval);
         }
-        // 設定每5分鐘檢查更新一次（實際自動更新由服務器每24小時執行）
+        // 每5分鐘只查小型版本資訊；版本沒變就不下載完整商品清單。
         autoRefreshInterval = setInterval(() => {
-            loadProducts();
+            checkForProductUpdates();
         }, 5 * 60 * 1000);
     }
 }
@@ -180,6 +181,7 @@ async function loadProducts() {
         if (response.data.success) {
             allProducts = response.data.products;
             filteredProducts = allProducts;
+            dataVersions[currentStore] = response.data.dataVersion;
             
             // 更新統計資訊
             updateStatistics(response.data);
@@ -208,16 +210,35 @@ async function loadProducts() {
     }
 }
 
+async function checkForProductUpdates() {
+    if (!isAuthenticated || document.hidden) return;
+
+    try {
+        const response = await axios.get(`/api/sync-status?store=${currentStore}`);
+        if (!response.data.success) return;
+
+        const knownVersion = dataVersions[currentStore];
+        if (!knownVersion || knownVersion !== response.data.dataVersion) {
+            await loadProducts();
+        }
+    } catch (error) {
+        console.error('檢查商品版本失敗:', error);
+    }
+}
+
 // 智能更新商品資料（只在必要時執行爬蟲）
-async function refreshProducts() {
-    const refreshBtn = event.target;
+async function refreshProducts(event, force = false) {
+    if (force && !confirm('完整更新會逐頁檢查目前賣場，確定要執行嗎？')) return;
+
+    const refreshBtn = event.currentTarget || event.target;
     refreshBtn.disabled = true;
-    refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>智能檢查中...';
+    refreshBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${force ? '完整更新中...' : '輕量檢查中...'}`;
     
     try {
         // 使用智能更新端點，傳送當前選擇的賣場
         const response = await axios.post('/api/refresh', {
-            store: currentStore  // 傳送當前選擇的賣場（yuanzhengshan 或 youmao）
+            store: currentStore,
+            force
         });
         
         if (response.data.success) {
@@ -226,7 +247,11 @@ async function refreshProducts() {
             
             // 根據智能更新的結果顯示相應訊息
             const storeName = getStoreDisplayName(currentStore);
-            const message = response.data.message || `${storeName} 智能更新完成`;
+            let message = response.data.message || `${storeName} 智能更新完成`;
+            const updateStats = response.data.result?.[currentStore]?.result?.update;
+            if (updateStats) {
+                message += `（新增 ${updateStats.newCount}、修改 ${updateStats.modifiedCount}、價格變動 ${updateStats.priceChangedCount}、下架 ${updateStats.removedCount}）`;
+            }
             showSuccess(message);
         } else {
             const storeName = getStoreDisplayName(currentStore);
@@ -237,7 +262,9 @@ async function refreshProducts() {
         showError('無法執行智能更新，請稍後再試');
     } finally {
         refreshBtn.disabled = false;
-        refreshBtn.innerHTML = '<i class="bi bi-brain"></i> 智能更新';
+        refreshBtn.innerHTML = force
+            ? '<i class="bi bi-arrow-repeat"></i> 完整更新'
+            : '<i class="bi bi-brain"></i> 輕量檢查';
     }
 }
 
@@ -271,6 +298,8 @@ function displayProducts(products) {
                 <img src="${product.imageUrl || 'https://via.placeholder.com/100'}" 
                      alt="${product.name}" 
                      class="product-img-mobile"
+                     loading="lazy"
+                     decoding="async"
                      onerror="this.src='https://via.placeholder.com/100'"
                      onclick='showProductDetail(${JSON.stringify(product).replace(/'/g, "&#39;")})'>
             </td>
@@ -592,10 +621,10 @@ function startUpdateLogsPolling() {
     // 初始載入
     loadUpdateLogs();
     
-    // 每30秒更新一次
+    // 日誌不是即時關鍵資料，降低為每2分鐘，頁面在背景時不請求。
     setInterval(() => {
-        loadUpdateLogs();
-    }, 30000);
+        if (!document.hidden) loadUpdateLogs();
+    }, 120000);
 }
 
 // 搜尋功能
@@ -813,6 +842,7 @@ async function loadProductsForStore(storeType) {
         if (response.data.success) {
             allProducts = response.data.products;
             filteredProducts = allProducts;
+            dataVersions[storeType] = response.data.dataVersion;
             
             // 更新統計資訊
             updateStatistics(response.data);

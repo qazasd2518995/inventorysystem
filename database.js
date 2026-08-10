@@ -1,18 +1,26 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// PostgreSQL 資料庫配置
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL || 'postgresql://inventory_etrp_user:WDJMfBCcsdDia908CWWeWLD4nswfhIgl@dpg-d2i2gp3uibrs73dqr3vg-a.singapore-postgres.render.com/inventory_etrp',
+// PostgreSQL 資料庫配置。連線資訊只能來自環境變數，避免把正式密碼放進程式碼。
+const poolConfig = process.env.DATABASE_URL ? {
+    connectionString: process.env.DATABASE_URL
+} : {
     host: process.env.DB_HOST,
     port: process.env.DB_PORT || 5432,
     database: process.env.DB_NAME,
     user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    ssl: {
-        rejectUnauthorized: false // Render 需要 SSL
-    }
-});
+    password: process.env.DB_PASSWORD
+};
+
+const databaseNeedsSsl = process.env.DB_SSL === 'true'
+    || process.env.NODE_ENV === 'production'
+    || /\.render\.com(?:\/|$)/i.test(process.env.DATABASE_URL || process.env.DB_HOST || '');
+
+if (databaseNeedsSsl && process.env.DB_SSL !== 'false') {
+    poolConfig.ssl = { rejectUnauthorized: false };
+}
+
+const pool = new Pool(poolConfig);
 
 // 初始化資料庫表結構
 async function initializeDatabase() {
@@ -106,6 +114,31 @@ async function initializeDatabase() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        // 保存真正的價格變動，和「這次有抓到」的時間分開。
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS product_price_history (
+                id BIGSERIAL PRIMARY KEY,
+                product_id VARCHAR(20) NOT NULL,
+                store_type VARCHAR(20) NOT NULL,
+                old_price INTEGER NOT NULL,
+                new_price INTEGER NOT NULL,
+                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // 跨 Render 重啟仍可保留同步狀態；不再依賴記憶體旗標判斷。
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS sync_state (
+                store_type VARCHAR(20) PRIMARY KEY,
+                last_started_at TIMESTAMP,
+                last_success_at TIMESTAMP,
+                last_failed_at TIMESTAMP,
+                last_error TEXT,
+                last_result JSONB,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
         
         // 創建索引以提升查詢效能
         await client.query(`
@@ -113,6 +146,7 @@ async function initializeDatabase() {
             CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active);
             CREATE INDEX IF NOT EXISTS idx_update_logs_created_at ON update_logs(created_at);
             CREATE INDEX IF NOT EXISTS idx_update_logs_type ON update_logs(type);
+            CREATE INDEX IF NOT EXISTS idx_price_history_product ON product_price_history(store_type, product_id, changed_at DESC);
         `);
         
         console.log('✅ 資料庫表結構初始化完成');
@@ -137,10 +171,15 @@ async function upsertProduct(product, storeType = 'yuanzhengshan') {
             DO UPDATE SET 
                 name = EXCLUDED.name,
                 price = EXCLUDED.price,
-                image_url = EXCLUDED.image_url,
-                product_url = EXCLUDED.product_url,
-                updated_at = EXCLUDED.updated_at,
+                image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
+                product_url = COALESCE(NULLIF(EXCLUDED.product_url, ''), products.product_url),
+                updated_at = CURRENT_TIMESTAMP,
                 is_active = TRUE
+            WHERE products.name IS DISTINCT FROM EXCLUDED.name
+               OR products.price IS DISTINCT FROM EXCLUDED.price
+               OR (NULLIF(EXCLUDED.image_url, '') IS NOT NULL AND products.image_url IS DISTINCT FROM EXCLUDED.image_url)
+               OR (NULLIF(EXCLUDED.product_url, '') IS NOT NULL AND products.product_url IS DISTINCT FROM EXCLUDED.product_url)
+               OR products.is_active IS DISTINCT FROM TRUE
             RETURNING *
         `, [
             product.id,
@@ -161,6 +200,8 @@ async function upsertProduct(product, storeType = 'yuanzhengshan') {
 
 // 批量插入或更新商品
 async function upsertProducts(products, storeType = 'yuanzhengshan') {
+    if (!Array.isArray(products) || products.length === 0) return [];
+
     const client = await pool.connect();
     
     try {
@@ -169,43 +210,53 @@ async function upsertProducts(products, storeType = 'yuanzhengshan') {
         console.log(`📝 開始批量更新 ${products.length} 個${storeType}商品到資料庫...`);
         
         const results = [];
-        const batchSize = 150; // 針對2GB RAM優化，增加批量大小
+        const batchSize = 250;
         
         for (let i = 0; i < products.length; i += batchSize) {
             const batch = products.slice(i, i + batchSize);
             
-            for (const product of batch) {
-                const result = await client.query(`
-                    INSERT INTO products (id, store_type, name, price, image_url, product_url, scraped_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    ON CONFLICT (id, store_type) 
-                    DO UPDATE SET 
-                        name = EXCLUDED.name,
-                        price = EXCLUDED.price,
-                        image_url = EXCLUDED.image_url,
-                        product_url = EXCLUDED.product_url,
-                        updated_at = EXCLUDED.updated_at,
-                        is_active = TRUE
-                    RETURNING *
-                `, [
-                    product.id,
+            const params = [];
+            const valueSql = batch.map((product, batchIndex) => {
+                const base = batchIndex * 8;
+                params.push(
+                    String(product.id),
                     storeType,
                     product.name,
-                    product.price || 0,
+                    Number(product.price) || 0,
                     product.imageUrl || null,
-                    product.url || null,
+                    product.url || product.link || null,
                     product.scrapedAt ? new Date(product.scrapedAt) : new Date(),
                     new Date()
-                ]);
-                
-                results.push(result.rows[0]);
-            }
+                );
+                return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
+            }).join(',');
+
+            const result = await client.query(`
+                INSERT INTO products (id, store_type, name, price, image_url, product_url, scraped_at, updated_at)
+                VALUES ${valueSql}
+                ON CONFLICT (id, store_type)
+                DO UPDATE SET
+                    name = EXCLUDED.name,
+                    price = EXCLUDED.price,
+                    image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), products.image_url),
+                    product_url = COALESCE(NULLIF(EXCLUDED.product_url, ''), products.product_url),
+                    updated_at = CURRENT_TIMESTAMP,
+                    is_active = TRUE
+                WHERE products.name IS DISTINCT FROM EXCLUDED.name
+                   OR products.price IS DISTINCT FROM EXCLUDED.price
+                   OR (NULLIF(EXCLUDED.image_url, '') IS NOT NULL AND products.image_url IS DISTINCT FROM EXCLUDED.image_url)
+                   OR (NULLIF(EXCLUDED.product_url, '') IS NOT NULL AND products.product_url IS DISTINCT FROM EXCLUDED.product_url)
+                   OR products.is_active IS DISTINCT FROM TRUE
+                RETURNING *
+            `, params);
+
+            results.push(...result.rows);
             
             console.log(`✅ 已處理 ${Math.min(i + batchSize, products.length)}/${products.length} 個商品`);
         }
         
         await client.query('COMMIT');
-        console.log(`🎉 批量更新完成，共處理 ${results.length} 個商品`);
+        console.log(`🎉 批量更新完成，實際新增或變更 ${results.length} 個商品`);
         
         return results;
         
@@ -377,6 +428,7 @@ async function compareAndUpdateProducts(newProducts, storeType = 'yuanzhengshan'
         let removedCount = 0;
         
         const productsToUpdate = [];
+        const priceChanges = [];
         
         // 檢查新增和修改的商品
         for (const [id, newProduct] of newProductsMap) {
@@ -397,6 +449,14 @@ async function compareAndUpdateProducts(newProducts, storeType = 'yuanzhengshan'
                 if (hasChanges) {
                     productsToUpdate.push(newProduct);
                     modifiedCount++;
+
+                    if (Number(existingProduct.price) !== Number(newProduct.price)) {
+                        priceChanges.push({
+                            productId: id,
+                            oldPrice: Number(existingProduct.price) || 0,
+                            newPrice: Number(newProduct.price) || 0
+                        });
+                    }
                 }
             }
         }
@@ -420,17 +480,141 @@ async function compareAndUpdateProducts(newProducts, storeType = 'yuanzhengshan'
         if (removedProductIds.length > 0) {
             await deactivateProducts(removedProductIds, storeType);
         }
+
+        if (priceChanges.length > 0) {
+            const params = [];
+            const values = priceChanges.map((change, index) => {
+                const base = index * 4;
+                params.push(change.productId, storeType, change.oldPrice, change.newPrice);
+                return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
+            }).join(',');
+
+            await client.query(`
+                INSERT INTO product_price_history (product_id, store_type, old_price, new_price)
+                VALUES ${values}
+            `, params);
+        }
         
         return {
             newCount,
             modifiedCount,
             removedCount,
+            priceChangedCount: priceChanges.length,
             totalUpdated: productsToUpdate.length
         };
         
     } finally {
         client.release();
     }
+}
+
+// 使用 PostgreSQL advisory lock，避免多個請求或多個 Render 實例同時跑爬蟲。
+async function tryAcquireSyncLock(lockName = 'inventory-marketplace-sync') {
+    const client = await pool.connect();
+    try {
+        const result = await client.query(
+            'SELECT pg_try_advisory_lock(hashtext($1)) AS locked',
+            [lockName]
+        );
+
+        if (!result.rows[0].locked) {
+            client.release();
+            return null;
+        }
+
+        let released = false;
+        return async () => {
+            if (released) return;
+            released = true;
+            try {
+                await client.query('SELECT pg_advisory_unlock(hashtext($1))', [lockName]);
+            } finally {
+                client.release();
+            }
+        };
+    } catch (error) {
+        client.release();
+        throw error;
+    }
+}
+
+async function recordSyncState(storeType, status, details = null) {
+    const client = await pool.connect();
+    try {
+        if (status === 'started') {
+            await client.query(`
+                INSERT INTO sync_state (store_type, last_started_at, updated_at)
+                VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (store_type) DO UPDATE SET
+                    last_started_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+            `, [storeType]);
+        } else if (status === 'success') {
+            await client.query(`
+                INSERT INTO sync_state (store_type, last_success_at, last_error, last_result, updated_at)
+                VALUES ($1, CURRENT_TIMESTAMP, NULL, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (store_type) DO UPDATE SET
+                    last_success_at = CURRENT_TIMESTAMP,
+                    last_error = NULL,
+                    last_result = EXCLUDED.last_result,
+                    updated_at = CURRENT_TIMESTAMP
+            `, [storeType, details ? JSON.stringify(details) : null]);
+        } else if (status === 'failed') {
+            await client.query(`
+                INSERT INTO sync_state (store_type, last_failed_at, last_error, updated_at)
+                VALUES ($1, CURRENT_TIMESTAMP, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (store_type) DO UPDATE SET
+                    last_failed_at = CURRENT_TIMESTAMP,
+                    last_error = EXCLUDED.last_error,
+                    updated_at = CURRENT_TIMESTAMP
+            `, [storeType, details && details.error ? details.error : String(details || '未知錯誤')]);
+        }
+    } finally {
+        client.release();
+    }
+}
+
+async function getSyncState(storeType) {
+    const result = await pool.query(`
+        SELECT store_type AS "storeType", last_started_at AS "lastStartedAt",
+               last_success_at AS "lastSuccessAt", last_failed_at AS "lastFailedAt",
+               last_error AS "lastError", last_result AS "lastResult"
+        FROM sync_state
+        WHERE store_type = $1
+    `, [storeType]);
+    return result.rows[0] || null;
+}
+
+// 查詢真正的價格異動；商品每次被讀取或同步不會產生紀錄。
+async function getPriceChanges(storeType = null, limit = 50) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 50, 1), 200);
+    const params = [];
+    let whereSql = '';
+
+    if (storeType) {
+        params.push(storeType);
+        whereSql = 'WHERE history.store_type = $1';
+    }
+
+    params.push(safeLimit);
+    const limitParameter = `$${params.length}`;
+    const result = await pool.query(`
+        SELECT history.product_id AS "productId",
+               history.store_type AS "storeType",
+               products.name,
+               history.old_price AS "oldPrice",
+               history.new_price AS "newPrice",
+               history.changed_at AS "changedAt"
+        FROM product_price_history history
+        LEFT JOIN products
+          ON products.id = history.product_id
+         AND products.store_type = history.store_type
+        ${whereSql}
+        ORDER BY history.changed_at DESC
+        LIMIT ${limitParameter}
+    `, params);
+
+    return result.rows;
 }
 
 // 添加更新日誌
@@ -526,5 +710,9 @@ module.exports = {
     getUpdateLogs,
     clearUpdateLogs,
     testConnection,
-    closePool
+    closePool,
+    tryAcquireSyncLock,
+    recordSyncState,
+    getSyncState,
+    getPriceChanges
 };

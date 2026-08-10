@@ -1,17 +1,19 @@
 services:
   - type: web
-    name: yahoo-auction-exporter
-    env: node
-    plan: starter
-    runtime: node
-    buildCommand: npm install
-    startCommand: npm start
+    name: inventorysystem
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
-        value: production
-      - key: NODE_VERSION
-        value: 20
-      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: true
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/google-chrome-stable
+        value: "production"
+      - key: DB_SSL
+        value: "true"
+      - key: COUNT_CHECK_TIMEOUT_MS
+        value: "15000"
+      - key: RUTEN_SELLER_ID
+        value: "1994160"
+      - key: RUTEN_API_TIMEOUT_MS
+        value: "20000"
+      - key: RUTEN_REQUEST_DELAY_MS
+        value: "100"

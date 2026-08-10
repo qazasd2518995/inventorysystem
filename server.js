@@ -23,23 +23,33 @@ const {
     addUpdateLogToDB,
     getUpdateLogs,
     clearUpdateLogs,
-    testConnection
+    testConnection,
+    getSyncState,
+    getPriceChanges
 } = require('./database');
 
 // 引入資料庫爬蟲
 const { fetchYahooAuctionProductsWithDB } = require('./database_scraper');
 
 // 引入智能爬蟲管理器
-const { smartUpdate, initializationCheck } = require('./smart_scraper');
+const { smartUpdate } = require('./smart_scraper');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+}
+
 // 登入系統配置
 const LOGIN_CREDENTIALS = {
-    username: process.env.LOGIN_USERNAME || '2518995',
-    password: process.env.LOGIN_PASSWORD || '2518995'
+    username: process.env.LOGIN_USERNAME,
+    password: process.env.LOGIN_PASSWORD
 };
+
+if (!LOGIN_CREDENTIALS.username || !LOGIN_CREDENTIALS.password) {
+    throw new Error('缺少 LOGIN_USERNAME 或 LOGIN_PASSWORD 環境變數');
+}
 
 // 中間件
 app.use(cors());
@@ -48,11 +58,13 @@ app.use(express.static('public'));
 
 // 會話管理設定
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'yahoo-auction-secret-2518995',
+    secret: process.env.SESSION_SECRET || (() => { throw new Error('缺少 SESSION_SECRET 環境變數'); })(),
     resave: false,
     saveUninitialized: false,
     cookie: { 
-        secure: false, // 在生產環境中應設為 true (需要 HTTPS)
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        sameSite: 'lax',
         maxAge: 24 * 60 * 60 * 1000 // 24小時
     }
 }));
@@ -126,6 +138,11 @@ function calculateImageStats(products) {
         withoutImages: productsWithoutImages,
         successRate: imageSuccessRate
     };
+}
+
+function buildDataVersion(storeType, stats) {
+    const timestamp = stats.lastUpdate ? new Date(stats.lastUpdate).getTime() : 0;
+    return `${storeType}:${stats.total || 0}:${timestamp}`;
 }
 
 // 比較商品差異並記錄變更
@@ -1802,47 +1819,10 @@ app.get('/api/products', requireAuth, async (req, res) => {
             
             console.log(`✅ 從資料庫讀取到 ${products.length} 個${storeType}商品`);
             
-            // 如果源正山資料庫沒有資料，觸發初始化抓取
-            if (products.length === 0) {
-                console.log('⚠️ 源正山資料庫無資料，觸發初始化抓取...');
-                try {
-                    await fetchYahooAuctionProducts();
-                    // 重新從資料庫讀取
-                    const newProducts = await getActiveProducts(storeType);
-                    const newStats = await getProductStats(storeType);
-                
-                res.json({
-                    success: true,
-                    products: newProducts,
-                    lastUpdate: newStats.lastUpdate,
-                    total: newStats.total,
-                    imageStats: {
-                        withImages: newStats.withImages,
-                        withoutImages: newStats.withoutImages,
-                        successRate: newStats.imageSuccessRate
-                    }
-                });
-                return;
-            } catch (error) {
-                console.error('初始化抓取失敗:', error.message);
-                // 使用測試資料作為備用
-                const testData = generateTestData();
-                res.json({
-                    success: true,
-                    products: testData,
-                    lastUpdate: new Date(),
-                    total: testData.length,
-                    imageStats: {
-                        withImages: testData.length,
-                        withoutImages: 0,
-                        successRate: '100.0%'
-                    }
-                });
-                return;
-            }
+            // 讀取 API 永遠只讀資料庫；空資料也不在使用者請求中啟動爬蟲。
         }
-        
-        }        // 智慧更新邏輯（暫時停用，直接返回資料庫資料）
+
+        // 智慧更新邏輯（暫時停用，直接返回資料庫資料）
         /*
         else if (!isUpdating && lastUpdateTime && 
                 ((now - lastUpdateTime) > 5 * 60 * 1000 && 
@@ -1870,11 +1850,21 @@ app.get('/api/products', requireAuth, async (req, res) => {
         */
         
         // 返回資料庫數據
+        const dataVersion = buildDataVersion(storeType, stats);
+        const etag = `W/"${Buffer.from(dataVersion).toString('base64url')}"`;
+        res.set('Cache-Control', 'private, no-cache');
+        res.set('ETag', etag);
+
+        if (req.headers['if-none-match'] === etag) {
+            return res.status(304).end();
+        }
+
         res.json({
             success: true,
             products: products,
             lastUpdate: stats.lastUpdate,
             total: stats.total,
+            dataVersion,
             imageStats: {
                 withImages: stats.withImages,
                 withoutImages: stats.withoutImages,
@@ -1887,6 +1877,49 @@ app.get('/api/products', requireAuth, async (req, res) => {
             success: false,
             error: error.message
         });
+    }
+});
+
+// 小型版本檢查：前端先查這裡，版本不變就不下載三千多筆商品。
+app.get('/api/sync-status', requireAuth, async (req, res) => {
+    try {
+        const storeType = req.query.store || 'yuanzhengshan';
+        if (!['yuanzhengshan', 'youmao'].includes(storeType)) {
+            return res.status(400).json({ success: false, error: '無效的賣場類型' });
+        }
+
+        const [stats, syncState] = await Promise.all([
+            getProductStats(storeType),
+            getSyncState(storeType)
+        ]);
+
+        res.set('Cache-Control', 'private, no-store');
+        res.json({
+            success: true,
+            store: storeType,
+            dataVersion: buildDataVersion(storeType, stats),
+            total: stats.total,
+            lastUpdate: stats.lastUpdate,
+            sync: syncState
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 只回傳真正發生過的價格異動，方便確認調價而不必重抓商品。
+app.get('/api/price-changes', requireAuth, async (req, res) => {
+    try {
+        const storeType = req.query.store || null;
+        if (storeType && !['yuanzhengshan', 'youmao'].includes(storeType)) {
+            return res.status(400).json({ success: false, error: '無效的賣場類型' });
+        }
+
+        const changes = await getPriceChanges(storeType, req.query.limit);
+        res.set('Cache-Control', 'private, no-store');
+        res.json({ success: true, changes, total: changes.length });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -2008,7 +2041,10 @@ app.get('/api/force-update', requireAuth, async (req, res) => {
         addUpdateLog('info', '手動觸發完整更新...');
         
         try {
-            await fetchYahooAuctionProducts();
+            const updateResult = await smartUpdate({ force: true, storeType: 'yuanzhengshan' });
+            if (updateResult.busy) {
+                return res.status(409).json({ success: false, message: updateResult.summary });
+            }
             
             // 從資料庫讀取最新統計
             const stats = await getProductStats();
@@ -2125,23 +2161,36 @@ app.post('/api/clear-logs', requireAuth, async (req, res) => {
     }
 });
 
-// API路由 - 手動更新商品資料（強制執行爬蟲）
-app.post('/api/refresh', async (req, res) => {
+// API路由 - 手動更新商品資料。預設先做輕量檢查，只有明確 force 才完整抓取。
+app.post('/api/refresh', requireAuth, async (req, res) => {
     try {
         // 從請求中獲取賣場類型
-        const { store } = req.body;
+        const { store, force = false } = req.body;
+
+        if (store && !['yuanzhengshan', 'youmao'].includes(store)) {
+            return res.status(400).json({ success: false, error: '無效的賣場類型' });
+        }
+
+        if (isUpdating) {
+            return res.status(409).json({ success: false, message: '同步工作正在執行中，請稍後再試' });
+        }
+
+        isUpdating = true;
         
         if (store) {
-            console.log(`🔧 手動觸發 ${store} 強制更新（跳過數量檢查）...`);
+            console.log(`${force ? '🔧' : '🧠'} 手動觸發 ${store} ${force ? '完整更新' : '輕量檢查'}...`);
         } else {
-            console.log('🔧 手動觸發全部賣場強制更新（跳過數量檢查）...');
+            console.log(`${force ? '🔧' : '🧠'} 手動觸發全部賣場${force ? '完整更新' : '輕量檢查'}...`);
         }
         
-        // 手動更新時使用 force: true 強制執行爬蟲，可指定特定賣場
         const result = await smartUpdate({ 
-            force: true,
+            force: force === true,
             storeType: store || null  // 如果有指定賣場就只更新該賣場
         });
+
+        if (result.busy) {
+            return res.status(409).json({ success: false, message: result.summary });
+        }
         
         // 從資料庫讀取最新統計
         const yuanzhengStats = await getProductStats('yuanzhengshan');
@@ -2176,6 +2225,8 @@ app.post('/api/refresh', async (req, res) => {
             success: false,
             error: error.message
         });
+    } finally {
+        isUpdating = false;
     }
 });
 
@@ -2185,7 +2236,10 @@ app.post('/api/refresh-yuanzhengshan', requireAuth, async (req, res) => {
         console.log('手動觸發源正山商品抓取...');
         addUpdateLog('info', '手動觸發源正山商品抓取...');
         
-        await fetchYahooAuctionProducts();
+        const updateResult = await smartUpdate({ force: true, storeType: 'yuanzhengshan' });
+        if (updateResult.busy) {
+            return res.status(409).json({ success: false, message: updateResult.summary });
+        }
         
         // 從資料庫讀取最新源正山資料
         const yuanzhengProducts = await getActiveProducts('yuanzhengshan');
@@ -2223,8 +2277,10 @@ app.post('/api/refresh-youmao', requireAuth, async (req, res) => {
         console.log('手動觸發友茂商品抓取...');
         addUpdateLog('info', '手動觸發友茂商品抓取...');
         
-        const { fetchRutenProducts } = require('./ruten_scraper_stable');
-        await fetchRutenProducts();
+        const updateResult = await smartUpdate({ force: true, storeType: 'youmao' });
+        if (updateResult.busy) {
+            return res.status(409).json({ success: false, message: updateResult.summary });
+        }
         
         // 從資料庫讀取最新友茂資料
         const youmaoProducts = await getActiveProducts('youmao');
@@ -2476,86 +2532,20 @@ app.get('/api/export', requireAuth, async (req, res) => {
     }
 });
 
-// 設定定時更新 - 每24小時（1天）檢查一次更新
-setInterval(async () => {
-    if (!isUpdating) {
-        console.log('執行每日定時檢查更新...');
-        addUpdateLog('info', '執行每日定時檢查更新...');
-        isUpdating = true;
-        try {
-            // 源正山商品完整更新
-            console.log('🔄 開始源正山每日定時更新...');
-            addUpdateLog('info', '開始源正山每日定時更新...');
-            await fetchYahooAuctionProducts();
-            addUpdateLog('success', '源正山每日定時更新完成');
-            console.log('[SUCCESS] 源正山每日定時更新完成');
-            
-            // 友茂商品完整更新
-            try {
-                console.log('🔄 開始友茂每日定時更新...');
-                addUpdateLog('info', '開始友茂每日定時更新...');
-                const { fetchRutenProducts } = require('./ruten_scraper_stable');
-                await fetchRutenProducts();
-                addUpdateLog('success', '友茂每日定時更新完成');
-                console.log('[SUCCESS] 友茂每日定時更新完成');
-            } catch (youmaoError) {
-                console.error('[ERROR] 友茂每日定時更新失敗:', youmaoError.message);
-                addUpdateLog('error', `友茂每日定時更新失敗: ${youmaoError.message}`);
-            }
-            
-            addUpdateLog('success', '每日定時更新完成');
-            console.log('[SUCCESS] 每日定時更新完成');
-        } catch (error) {
-            console.error('每日定時更新失敗:', error);
-            addUpdateLog('error', `每日定時更新失敗: ${error.message}`);
-        } finally {
-            isUpdating = false;
-        }
-    } else {
-        console.log('⚠️ 系統正在更新中，跳過本次每日定時更新');
-        addUpdateLog('warning', '系統正在更新中，跳過本次每日定時更新');
-    }
-}, 24 * 60 * 60 * 1000); // 24小時 (1天)
-
-// 智能初始化檢查 - 根據商品數量一致性決定更新
-setTimeout(async () => {
-    if (!isUpdating) {
-        console.log('🧠 伺服器啟動：執行智能初始化檢查...');
-        isUpdating = true;
-        try {
-            // 先載入測試資料讓系統可用
-            productsCache = generateTestData();
-            lastUpdateTime = new Date();
-            
-            const initResult = await initializationCheck();
-            
-            if (initResult.initialized) {
-                console.log('🎉 智能初始化完成');
-                addUpdateLog('success', `系統啟動完成: ${initResult.result?.summary || '智能檢查完成'}`);
-            } else {
-                console.log('⚠️ 智能初始化失敗，但系統可正常運行');
-                addUpdateLog('warning', `智能初始化失敗: ${initResult.error || '未知錯誤'}`);
-            }
-            
-            console.log('✅ 系統初始化完成，伺服器就緒');
-        } catch (error) {
-            console.error('❌ 智能初始化失敗:', error.message);
-            addUpdateLog('error', `智能初始化失敗: ${error.message}`);
-            // 保持測試資料，系統仍可運行
-        } finally {
-            isUpdating = false;
-        }
-    }
-}, 10000); // 延遲10秒啟動，讓系統穩定
-
 // 啟動伺服器（僅在直接執行時啟動）
 if (require.main === module) {
-    app.listen(PORT, () => {
-        console.log(`伺服器運行在 http://localhost:${PORT}`);
-        console.log('正在初始化並抓取商品資料...');
-    });
+    initializeDatabase()
+        .then(() => {
+            app.listen(PORT, () => {
+                console.log(`伺服器運行在 http://localhost:${PORT}`);
+                console.log('✅ 資料庫已就緒；啟動時不執行平台爬蟲');
+            });
+        })
+        .catch(error => {
+            console.error('❌ 伺服器啟動失敗:', error.message);
+            process.exit(1);
+        });
 }
 
 // 導出app以供Vercel使用
 module.exports = app;
-

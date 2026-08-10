@@ -118,13 +118,16 @@
                         <button class="btn btn-success me-2" onclick="exportExcel()">
                             <i class="bi bi-file-earmark-excel"></i> 匯出 Excel
                         </button>
-                        <button class="btn btn-primary me-2" onclick="refreshProducts()">
-                            <i class="bi bi-brain"></i> 智能更新
+                        <button class="btn btn-primary me-2" onclick="refreshProducts(event, false)">
+                            <i class="bi bi-brain"></i> 輕量檢查
+                        </button>
+                        <button class="btn btn-outline-warning me-2" onclick="refreshProducts(event, true)">
+                            <i class="bi bi-arrow-repeat"></i> 完整更新
                         </button>
                         <div class="form-check form-switch d-inline-block">
                             <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
                             <label class="form-check-label" for="autoRefresh">
-                                自動更新 (每24小時)
+                                資料變更時自動重新載入
                             </label>
                         </div>
                     </div>

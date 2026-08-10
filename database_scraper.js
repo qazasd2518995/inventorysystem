@@ -2,8 +2,7 @@
 const puppeteer = require('puppeteer');
 const { 
     initializeDatabase, 
-    compareAndUpdateProducts, 
-    upsertProducts,
+    compareAndUpdateProducts,
     getActiveProducts, 
     getProductStats,
     addUpdateLogToDB 
@@ -37,6 +36,16 @@ async function fetchYahooAuctionProductsWithDB() {
         await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         await page.setViewport({ width: 1920, height: 1080 });
 
+        // 圖片網址可從 DOM/JSON 取得，不需要真的下載圖片、影音、字型與 CSS。
+        await page.setRequestInterception(true);
+        page.on('request', request => {
+            if (['image', 'media', 'font', 'stylesheet'].includes(request.resourceType())) {
+                request.abort();
+            } else {
+                request.continue();
+            }
+        });
+
         let currentPage = 1;
         let hasMorePages = true;
 
@@ -48,12 +57,12 @@ async function fetchYahooAuctionProductsWithDB() {
                 : `https://tw.bid.yahoo.com/booth/Y1823944291?userID=Y1823944291&catID=&catIDselect=&clf=&u=&s=&o=&pg=${currentPage}&mode=list`;
             
             await page.goto(pageUrl, { 
-                waitUntil: 'networkidle2', 
-                timeout: 60000 
+                waitUntil: 'domcontentloaded',
+                timeout: 45000
             });
 
             // 優化：根據伺服器配置調整等待時間
-            const waitTime = process.env.NODE_ENV === 'production' ? 2500 : 3000; // Render環境減少等待
+            const waitTime = process.env.NODE_ENV === 'production' ? 1500 : 2500;
             await new Promise(resolve => setTimeout(resolve, waitTime));
             
             // 原始版本：簡單滾動邏輯
@@ -191,17 +200,6 @@ async function fetchYahooAuctionProductsWithDB() {
             
             allProducts.push(...products);
             
-            // 每5頁存入資料庫（只插入/更新，不檢查下架）
-            if (currentPage % 5 === 0 && allProducts.length > 0) {
-                try {
-                    console.log(`💾 存入資料庫 (${allProducts.length} 個商品)...`);
-                    await upsertProducts(allProducts);
-                    await addUpdateLogToDB('info', `已處理前 ${currentPage} 頁，共 ${allProducts.length} 個商品`);
-                } catch (dbError) {
-                    console.error('資料庫存儲失敗:', dbError.message);
-                }
-            }
-            
             // 檢查是否為最後一頁
             // 源正山正常情況下每頁有60個商品，如果少於60個代表是最後一頁
             const isLastPage = products.length < 60 && products.length > 0;
@@ -222,6 +220,12 @@ async function fetchYahooAuctionProductsWithDB() {
 
         // 最終存入資料庫
         if (allProducts.length > 0) {
+            const currentStats = await getProductStats('yuanzhengshan');
+            const minimumExpected = currentStats.total > 0 ? Math.floor(currentStats.total * 0.8) : 1;
+            if (allProducts.length < minimumExpected) {
+                throw new Error(`抓取結果疑似不完整 (${allProducts.length}/${currentStats.total})，保留原資料`);
+            }
+
             console.log(`💾 最終存入資料庫...`);
             const updateResult = await compareAndUpdateProducts(allProducts);
             
