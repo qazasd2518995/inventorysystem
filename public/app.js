@@ -814,13 +814,13 @@ function updateStoreInfo(storeType) {
 function getStoreData(storeType) {
     const stores = {
         'yuanzhengshan': {
-            name: '源正山鋼索五金行',
+            name: '源正山（外匯嚴選）',
             platform: 'Yahoo拍賣',
             icon: 'bi bi-building',
             url: 'https://tw.bid.yahoo.com/booth/Y1823944291'
         },
         'youmao': {
-            name: '友茂',
+            name: '友茂工具',
             platform: '露天市集',
             icon: 'bi bi-tools',
             url: 'https://www.ruten.com.tw/store/u-mo0955900924/'

@@ -2440,7 +2440,7 @@ app.get('/api/export', requireAuth, async (req, res) => {
 
         // 創建並填充友茂工作表
         if (youmaoProducts.length > 0) {
-            const youmaoWorksheet = createWorksheet(workbook, '友茂');
+            const youmaoWorksheet = createWorksheet(workbook, '友茂工具-露天');
             fillWorksheetData(youmaoWorksheet, youmaoProducts);
             console.log(`✅ 友茂工作表完成: ${youmaoProducts.length} 個商品`);
         }
@@ -2467,7 +2467,7 @@ app.get('/api/export', requireAuth, async (req, res) => {
         // 添加統計資料
         if (yuanzhengProducts.length > 0) {
             summaryWorksheet.addRow({
-                store: '源正山鋼索五金行 (Yahoo拍賣)',
+                store: '源正山 (Yahoo拍賣／外匯嚴選)',
                 total: yuanzhengStats.total,
                 withImages: yuanzhengStats.withImages,
                 withoutImages: yuanzhengStats.withoutImages,
@@ -2478,7 +2478,7 @@ app.get('/api/export', requireAuth, async (req, res) => {
         
         if (youmaoProducts.length > 0) {
             summaryWorksheet.addRow({
-                store: '友茂 (露天市集)',
+                store: '友茂工具 (露天市集)',
                 total: youmaoStats.total,
                 withImages: youmaoStats.withImages,
                 withoutImages: youmaoStats.withoutImages,

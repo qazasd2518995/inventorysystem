@@ -1,7 +1,7 @@
 {
   "name": "yahoo-auction-exporter",
   "version": "1.0.0",
-  "description": "奇摩拍賣商品資訊即時更新與匯出系統",
+  "description": "源正山 Yahoo 與友茂工具露天商品同步及匯出系統",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
